@@ -200,6 +200,10 @@ cython_debug/
 #  refer to https://docs.cursor.com/context/ignore-files
 .cursorignore
 .cursorindexingignore
+# Local LLM context and personal Cursor rules (not committed)
+.context/
+.cursorrules
+.cursor/rules/
 
 # Marimo
 marimo/_static/
