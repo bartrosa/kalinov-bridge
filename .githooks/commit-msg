@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# Conventional Commits – rejects commit if first line doesn't match.
+# Format: type(scope): description   e.g. feat(docs): add install guide
+
+set -e
+msg_file="$1"
+[[ -f "$msg_file" ]] || exit 1
+
+first_line=$(head -n1 "$msg_file")
+# Empty or comment (#) – git handles that
+[[ -z "${first_line%%#*}" ]] && exit 0
+
+# Conventional: type(scope)?!?: description
+# types: feat fix docs style refactor perf test chore ci build
+if ! echo "$first_line" | grep -qE '^(feat|fix|docs|style|refactor|perf|test|chore|ci|build)(\([a-z0-9._-]+\))?!?: .+'; then
+  echo "Commit rejected: message must follow Conventional Commits."
+  echo ""
+  echo "Examples:"
+  echo "  feat(docs): add setup guide"
+  echo "  fix(api): handle null response"
+  echo "  docs: update readme"
+  echo ""
+  echo "Types: feat, fix, docs, style, refactor, perf, test, chore, ci, build"
+  echo "Scope (optional) in parentheses, then ': ' and description."
+  exit 1
+fi
+
+exit 0

@@ -1,0 +1,61 @@
+[build-system]
+requires = ["hatchling>=1.27.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "kalinov-bridge"
+version = "0.1.0"
+description = "Benchmark harness: LLM-generated proofs verified by Lean 4 (early scaffold)."
+readme = "README.md"
+license = { text = "Apache-2.0" }
+requires-python = ">=3.12"
+authors = [{ name = "Bart Rosa", email = "contact@bartrosa.dev" }]
+keywords = ["lean4", "llm", "benchmark", "formal-verification"]
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+]
+dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/bartrosa/kalinov-bridge"
+Repository = "https://github.com/bartrosa/kalinov-bridge"
+Issues = "https://github.com/bartrosa/kalinov-bridge/issues"
+
+[dependency-groups]
+dev = [
+    "mypy>=1.14.0",
+    "pytest>=8.3.0",
+    "ruff>=0.9.0",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/kalinov_bridge"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+extend-exclude = ["experiments"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = "-q"
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+explicit_package_bases = true
+packages = ["kalinov_bridge"]
+mypy_path = "src"
+
+[[tool.mypy.overrides]]
+module = "tests.*"
+disallow_untyped_defs = false

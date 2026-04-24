@@ -1,0 +1,26 @@
+name: Bug report
+description: Something does not work as documented
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: Thanks for taking the time to report a bug.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What did you expect vs what you saw?
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: How to reproduce
+      description: Commands, OS, Python/uv versions if relevant.
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Context
+      description: Logs, screenshots, or links (optional).
