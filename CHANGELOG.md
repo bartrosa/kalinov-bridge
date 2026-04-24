@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - `experiments/` directory for ad-hoc scripts (see `experiments/README.md`).
+- `lean/` Lake workspace with **mathlib** (`kalinov_bridge` package, `KalinovBridge` library) and CI job using **lean-action** + Mathlib cache.
 
 ## [0.1.0] - 2025-03-19
 

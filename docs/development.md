@@ -24,15 +24,22 @@ uv run pytest
 - `src/kalinov_bridge/` — importable Python package (orchestration will land here).
 - `tests/` — Pytest.
 - `experiments/` — ad-hoc scripts and exploratory runs (not part of the package; see `experiments/README.md`).
-- `lean/` — *planned*: Lake project for benchmark tasks (`lake build` as verifier).
+- `lean/` — Lake + **mathlib** workspace (`lake build` is the verifier). See [`lean/README.md`](../lean/README.md).
 
-## Lean (planned)
+## Lean / Lake
 
-When `lean/` exists:
+1. Install [Elan](https://github.com/leanprover/elan) (Lean version manager).
+2. From repo root:
 
-1. Install Lean 4 / Elan per [Lean 4 manual](https://lean-lang.org/lean4/doc/setup.html).
-2. Pin toolchain via `lean-toolchain` and mathlib via Lake (see project `README` inside `lean/`).
-3. Expect long first builds; CI will cache when the job is added.
+   ```bash
+   cd lean
+   lake exe cache get   # recommended; uses Mathlib precompiled cache when available
+   lake build
+   ```
+
+3. First clone can take a while while dependencies download; CI uses **lean-action** caching on `lean/.lake` and Mathlib’s `lake exe cache get`.
+
+Toolchain is pinned in `lean/lean-toolchain`; do not hand-edit without matching Mathlib’s expectations (see `lean/lakefile.toml`).
 
 ## Optional: git branch aliases
 

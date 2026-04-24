@@ -30,7 +30,7 @@ flowchart LR
 ## Requirements
 
 - **Python** 3.12+ recommended ([uv](https://docs.astral.sh/uv/) for env and tasks).
-- **Lean 4** + Lake — not wired in CI yet; first benchmark project will live under `lean/` (see [docs/development.md](docs/development.md)).
+- **Lean 4** + Lake — workspace under [`lean/`](lean/); CI runs `lake build` there via [lean-action](https://github.com/leanprover/lean-action) (with Mathlib cache). Details: [docs/development.md](docs/development.md).
 - **LLM API key** in the environment when you run experiments (e.g. `OPENAI_API_KEY`) — orchestration code is still minimal.
 
 ## Quick start
