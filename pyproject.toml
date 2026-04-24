@@ -21,6 +21,9 @@ classifiers = [
 ]
 dependencies = []
 
+[project.scripts]
+kalinov-bridge = "kalinov_bridge.cli:main"
+
 [project.urls]
 Homepage = "https://github.com/bartrosa/kalinov-bridge"
 Repository = "https://github.com/bartrosa/kalinov-bridge"

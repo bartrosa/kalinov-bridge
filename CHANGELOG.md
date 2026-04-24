@@ -15,6 +15,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `experiments/` directory for ad-hoc scripts (see `experiments/README.md`).
 - `lean/` Lake workspace with **mathlib** (`kalinov_bridge` package, `KalinovBridge` library) and CI job using **lean-action** + Mathlib cache.
+- **Makefile** (`make check`, `make run-demo`, …) delegating to `uv` and `lake`.
+- Minimal **demo runner**: mock LLM (`by sorry` → `by trivial`), `lake build`, restore `lean/KalinovBridge/Scratch.lean`, write `artifacts/.../results.jsonl`; CLI `kalinov-bridge run-demo`.
+- **`experiments/hello_e2e.py`** — same E2E path as a runnable hello-world script.
+- Runner **artifacts** now include `*.patched.lean` (verified source) and `*.original.lean` (pre-run snapshot) beside `results.jsonl`.
 
 ## [0.1.0] - 2025-03-19
 

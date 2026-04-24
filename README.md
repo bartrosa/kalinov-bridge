@@ -45,6 +45,8 @@ uv run mypy .
 uv run pytest
 ```
 
+Optional — same flows via **Make**: `make check`, `make run-demo` (see [docs/development.md](docs/development.md)). Hello-world E2E script: `uv run python experiments/hello_e2e.py`.
+
 Enable commit-msg checks (Conventional Commits):
 
 ```bash

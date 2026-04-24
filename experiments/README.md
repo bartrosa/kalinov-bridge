@@ -11,4 +11,12 @@ uv sync --group dev
 uv run python experiments/your_script.py
 ```
 
+### `hello_e2e.py`
+
+Minimal **mock LLM → Lake build → restore `Scratch.lean` → `artifacts/`** (same pipeline as `kalinov-bridge run-demo`):
+
+```bash
+uv run python experiments/hello_e2e.py
+```
+
 Promote stable code into `src/kalinov_bridge/` (and tests under `tests/`) when it matures.

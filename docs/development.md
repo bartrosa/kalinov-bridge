@@ -19,12 +19,36 @@ uv run mypy .
 uv run pytest
 ```
 
+### Make (optional)
+
+If you have GNU Make:
+
+```bash
+make help
+make check        # Python checks + lake build in lean/
+make run-demo     # mock LLM patches Scratch.lean, runs lake build, writes artifacts/
+```
+
+Same steps as CI for Python; `make run-demo` requires a working `lake` on your PATH.
+
+End-to-end smoke (also as a script under `experiments/`):
+
+```bash
+uv run python experiments/hello_e2e.py
+```
+
+Each run writes under `artifacts/…/`:
+
+- **`Scratch.patched.lean`** — source after the mock / LLM (what `lake build` checked; safe to copy into your own Lean file).
+- **`Scratch.original.lean`** — tree state before the run.
+- **`results.jsonl`**, **`lake_stderr.txt`** — metadata and logs.
+
 ## Layout
 
 - `src/kalinov_bridge/` — importable Python package (orchestration will land here).
 - `tests/` — Pytest.
 - `experiments/` — ad-hoc scripts and exploratory runs (not part of the package; see `experiments/README.md`).
-- `lean/` — Lake + **mathlib** workspace (`lake build` is the verifier). See [`lean/README.md`](../lean/README.md).
+- `lean/` — Lake + **mathlib** workspace (`lake build` is the verifier). See [`lean/README.md`](../lean/README.md). The demo runner edits `lean/KalinovBridge/Scratch.lean` briefly (then restores it).
 
 ## Lean / Lake
 

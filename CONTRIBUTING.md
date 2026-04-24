@@ -27,6 +27,8 @@ uv run mypy .
 uv run pytest
 ```
 
+Equivalent shortcut: `make python-check` (and `make check` includes `lake build` in `lean/`).
+
 ## Python environment
 
 Use **uv** (`uv sync --group dev`). Python **3.12+** is supported.
