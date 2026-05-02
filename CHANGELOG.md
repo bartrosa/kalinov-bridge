@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Eval harness: suite YAML loader, `ConfigMatrix`, `EvalRunner`, pure `aggregate`
+  reducers, JSON + Markdown reports, and cross-run Markdown comparison helpers.
+- `kalinov eval` CLI (flag-based matrix or YAML experiment file + overrides).
+- Benchmark layouts under `evals/` (`suites/smoke`, `suites/lean_basic`) plus starter
+  experiment YAML under `experiments/`.
 - Oracle loop: propose → verify → repair, parameterized by `Prover` and `LLMClient`.
 - `kalinov solve` CLI subcommand.
 - `oracle_loop.jsonl` telemetry stream linking LLM and prover call IDs.
