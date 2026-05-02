@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Mining pipeline skeleton: `Source` / `Extractor` / emit interfaces.
+- arXiv source (Atom API), with rate limiting.
+- Heuristic claim extractor (regex + keyword based).
+- Feature file emitter with per-scenario attribution (`# @attribution` comments).
+- `kalinov mine` CLI, network-gated by default (`--network` to fetch).
+- `mining.jsonl` telemetry stream on the active run.
+- `corpus/README.md` documenting mining conventions and license responsibility.
 - Eval harness: suite YAML loader, `ConfigMatrix`, `EvalRunner`, pure `aggregate`
   reducers, JSON + Markdown reports, and cross-run Markdown comparison helpers.
 - `kalinov eval` CLI (flag-based matrix or YAML experiment file + overrides).

@@ -5,7 +5,7 @@
 
 **Status: early scaffold / WIP** — API and Lean benchmark layout will evolve.
 
-Bridge between **natural language / LLM output** and **formal proofs in Lean 4**: run models against proof tasks, verify with `lake build`, record metrics (success rate, errors, timings).
+Bridge between **natural language / LLM output** and **formal proofs in Lean 4**: run models against proof tasks, verify with `lake build`, record metrics (success rate, errors, timings). Optional **mining** (off by default) can pull text from sources such as arXiv and write candidate `.feature` files for **human review** before they enter any suite — see [Mining](#mining).
 
 ```mermaid
 flowchart LR
@@ -80,6 +80,10 @@ git config core.hooksPath .githooks
 ### Optional: branch name helpers
 
 If you use a small global script + aliases (e.g. `git feat my-task` → branch `feat/my-task` from `main`), see [CONTRIBUTING.md](CONTRIBUTING.md#workflow). This repo does not require it—only clear branch names and green CI.
+
+## Mining
+
+The `kalinov mine` command is **opt-in** and **network-gated** (`--network`); it emits candidate Math-Gherkin files under `corpus/mined/` for manual editing before they are added to a benchmark suite. Conventions, attribution fields, and license responsibility are documented in [corpus/README.md](corpus/README.md).
 
 ## Docs
 
