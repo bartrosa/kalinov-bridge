@@ -34,6 +34,7 @@ def test_logs_success_line(tmp_path: Path) -> None:
         log_path = run.run_dir / "llm_calls.jsonl"
         assert log_path.is_file()
         row = json.loads(log_path.read_text(encoding="utf-8").strip().splitlines()[0])
+        assert "call_id" in row
         assert row["provider"] == "anthropic"
         assert row["cache_hit"] is False
         assert row["error_code"] is None

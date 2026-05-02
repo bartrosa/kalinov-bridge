@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
+import json
 import sys
+from decimal import Decimal
 from pathlib import Path
 
 from kalinov.bridges.forthel_lean import TranslationOutcomeKind, translate_step
@@ -16,7 +19,14 @@ from kalinov.interpreters import (
     RawInterpreter,
 )
 from kalinov.interpreters.base import InterpretedStep
+from kalinov.llm.budget import Budget, BudgetGuard
+from kalinov.llm.budget_context import set_budget_guard
+from kalinov.llm.cache import CacheMode, LLMCache
+from kalinov.llm.config import ConfigError
+from kalinov.llm.config import load_config as load_llm_config
+from kalinov.llm.factory import make_client
 from kalinov.llm.run_report import run_cost_report
+from kalinov.oracle import OracleConfig, OracleLoop, OracleOutcome, OracleOutcomeKind
 from kalinov.provers import (
     NullProver,
     NullProverConfig,
@@ -239,6 +249,152 @@ def _parse_files(args: argparse.Namespace) -> int:
     return 2
 
 
+def _oracle_line(o: OracleOutcome) -> str:
+    k = len(o.attempts)
+    cost_s = f"${o.total_cost_usd}"
+    name = o.obligation.name
+    if o.kind is OracleOutcomeKind.SOLVED:
+        return f"{name}: SOLVED in {k} iterations, {cost_s}"
+    reason = o.diagnostic or ""
+    return f"{name}: {o.kind.value.upper()} after {k} iterations: {reason}"
+
+
+async def _solve_async(args: argparse.Namespace) -> int:
+    paths = [Path(s) for s in args.files]
+    for path in paths:
+        if not path.is_file():
+            print(f"error: file not found: {path}", file=sys.stderr)
+            return 2
+
+    runs_dir = Path(args.runs_dir).resolve()
+
+    if args.cache_mode != "off" and args.cache_dir is None:
+        print("error: --cache-dir is required when --cache-mode is not off", file=sys.stderr)
+        return 2
+
+    cache: LLMCache | None = None
+    if args.cache_mode != "off" and args.cache_dir is not None:
+        cache = LLMCache(Path(args.cache_dir), mode=CacheMode(args.cache_mode))
+
+    try:
+        llm_cfg = load_llm_config(args.llm_config)
+    except ConfigError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+
+    if args.provider not in llm_cfg.providers:
+        print(f"error: unknown provider {args.provider!r}", file=sys.stderr)
+        return 2
+    prov_entry = llm_cfg.providers[args.provider]
+    model = args.model or prov_entry.default_model
+
+    if args.prover == "lean4":
+        try:
+            tc = detect_toolchain()
+        except ToolchainNotFoundError as exc:
+            print(str(exc), file=sys.stderr)
+            return 3
+        prover: Prover = LeanProver(toolchain=tc)
+    else:
+        prover = NullProver(NullProverConfig(mode=NullProverMode.ALWAYS_OK))
+
+    oc = OracleConfig(
+        max_repair_attempts=args.max_repair_attempts,
+        max_tokens_per_call=args.max_tokens,
+        temperature=args.temperature,
+        save_transcripts=args.save_transcripts,
+    )
+
+    max_cost: Decimal | None = None
+    if args.max_cost_usd is not None:
+        max_cost = Decimal(str(args.max_cost_usd))
+
+    try:
+        client = make_client(args.provider, config=llm_cfg, cache=cache)
+    except ConfigError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 3
+
+    chain = _interpret_chain()
+    parse_failed = False
+    obligations_total = 0
+    solved = 0
+    sum_usd = Decimal("0")
+
+    with start_run(runs_dir=runs_dir) as run:
+        guard: BudgetGuard | None = None
+        if max_cost is not None:
+            guard = BudgetGuard(Budget(max_cost_usd=max_cost))
+        set_budget_guard(guard)
+        try:
+            loop = OracleLoop(prover=prover, llm=client, model=model, config=oc)
+            for path in paths:
+                try:
+                    ff = parse_feature_file(path)
+                except GherkinParseError as exc:
+                    print(f"parse error in {path}: {exc}", file=sys.stderr)
+                    parse_failed = True
+                    continue
+
+                interpreted: list[InterpretedStep] = []
+                for scenario in ff.feature.scenarios:
+                    for step in scenario.steps:
+                        interpreted.append(chain.interpret(step))
+
+                spec = SpecDocument(
+                    feature_file=ff,
+                    interpreted_steps=tuple(interpreted),
+                )
+                try:
+                    obligations = prover.extract_obligations(spec)
+                except ProverError as exc:
+                    print(f"error in {path}: {exc}", file=sys.stderr)
+                    parse_failed = True
+                    continue
+
+                for obl in obligations:
+                    obligations_total += 1
+                    out = await loop.run(obl)
+                    print(_oracle_line(out))
+                    sum_usd += out.total_cost_usd
+                    if out.kind is OracleOutcomeKind.SOLVED:
+                        solved += 1
+        finally:
+            set_budget_guard(None)
+
+        manifest = {
+            "run_id": run.run_id,
+            "total_cost_usd": str(sum_usd),
+            "obligations_total": obligations_total,
+            "obligations_solved": solved,
+        }
+        (run.run_dir / "manifest.json").write_text(
+            json.dumps(manifest, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+
+        print()
+        print(
+            "summary:",
+            f"obligations={obligations_total}",
+            f"solved={solved}",
+            f"total_usd={sum_usd}",
+            f"run_id={run.run_id}",
+            f"telemetry_dir={run.run_dir}",
+            sep=" ",
+        )
+
+    if parse_failed:
+        return 2
+    if solved < obligations_total:
+        return 1
+    return 0
+
+
+def _run_solve(args: argparse.Namespace) -> int:
+    return asyncio.run(_solve_async(args))
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="kalinov")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -316,6 +472,67 @@ def main(argv: list[str] | None = None) -> int:
         help="Disable ForTheL→Lean translation for --prover lean4 (obligation path only).",
     )
 
+    solve = sub.add_parser("solve", help="LLM oracle: propose → verify → repair per obligation.")
+    solve.add_argument(
+        "files",
+        nargs="+",
+        metavar="FILE",
+        help="One or more .feature files.",
+    )
+    solve.add_argument("--prover", choices=["null", "lean4"], required=True)
+    solve.add_argument(
+        "--provider",
+        type=str,
+        required=True,
+        help="Provider name from kalinov.config.yaml.",
+    )
+    solve.add_argument("--model", type=str, default=None, help="Override provider default_model.")
+    solve.add_argument("--max-repair-attempts", type=int, default=3, metavar="N")
+    solve.add_argument(
+        "--max-cost-usd",
+        type=str,
+        default=None,
+        metavar="D",
+        help="Abort LLM calls when cumulative USD exceeds this budget.",
+    )
+    solve.add_argument(
+        "--max-tokens",
+        type=int,
+        default=2048,
+        metavar="N",
+        help="Per-completion max_tokens passed to the LLM.",
+    )
+    solve.add_argument("--temperature", type=float, default=0.0, metavar="T")
+    solve.add_argument(
+        "--save-transcripts",
+        action="store_true",
+        help="Write transcripts/<obligation>.json under the run directory.",
+    )
+    solve.add_argument(
+        "--cache-dir",
+        type=Path,
+        default=None,
+        help="Directory for the LLM response cache.",
+    )
+    solve.add_argument(
+        "--cache-mode",
+        choices=["read_write", "read_only", "off"],
+        default="off",
+        help="Cache behavior (requires --cache-dir unless off).",
+    )
+    solve.add_argument(
+        "--runs-dir",
+        type=Path,
+        default=Path("runs"),
+        help="Directory under which per-run folders are created.",
+    )
+    solve.add_argument(
+        "--llm-config",
+        type=Path,
+        default=None,
+        help="Optional path to kalinov.config.yaml (defaults to search path).",
+    )
+
     args = parser.parse_args(argv)
     if args.command == "cost" and args.cost_command == "report":
         code, out = run_cost_report(
@@ -331,6 +548,8 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.command == "check":
         return _parse_files(args)
+    if args.command == "solve":
+        return _run_solve(args)
     return 2
 
 

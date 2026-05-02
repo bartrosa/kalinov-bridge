@@ -21,6 +21,7 @@ def test_logs_to_active_run(tmp_path: Path) -> None:
         lines = log_path.read_text(encoding="utf-8").strip().splitlines()
     assert lines
     row = json.loads(lines[-1])
+    assert "call_id" in row
     assert row["backend"] == "null"
     assert row["operation"] == "check"
     assert row["ok"] is True
