@@ -46,7 +46,7 @@ packages = ["src/kalinov", "src/kalinov_bridge"]
 [tool.ruff]
 target-version = "py311"
 line-length = 100
-extend-exclude = ["experiments"]
+extend-exclude = ["experiments", "provers/lean/runtime/.lake"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM"]
@@ -54,7 +54,10 @@ select = ["E", "F", "I", "UP", "B", "SIM"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
-addopts = "-q"
+addopts = ["-q", "-m", "not lean"]
+markers = [
+    "lean: requires elan/lake and built provers/lean/runtime (see CI lean-prover job)",
+]
 
 [tool.mypy]
 python_version = "3.11"
