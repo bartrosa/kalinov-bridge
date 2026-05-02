@@ -1,0 +1,19 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <entry>
+    <id>http://arxiv.org/abs/2501.12345v1</id>
+    <title>  A  Nice  Paper  About  Numbers  </title>
+    <summary>
+      We prove that every integer greater than 1 has a prime factor.
+      Lemma 2. Auxiliary facts hold.
+    </summary>
+    <author><name>Ada Lovelace</name></author>
+    <author><name>Alan Turing</name></author>
+  </entry>
+  <entry>
+    <id>http://arxiv.org/abs/2502.99999v2</id>
+    <title>Another Title</title>
+    <summary>Theorem 3. Main result stated here.</summary>
+    <author><name>Solo Author</name></author>
+  </entry>
+</feed>
