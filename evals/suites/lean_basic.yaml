@@ -1,0 +1,45 @@
+suite_id: lean_basic
+description: |
+  Curated tasks copied from `examples/` for stable regression against Lean 4.
+  Expectations are mostly `either` until baselines are frozen.
+tasks:
+  - id: gauss_sum
+    file: ../tasks/gauss_sum.feature
+    expected: either
+    tags: [arithmetic]
+  - id: am_gm_inequality
+    file: ../tasks/am_gm_inequality.feature
+    expected: either
+    tags: [inequality]
+  - id: pythagoras
+    file: ../tasks/pythagoras.feature
+    expected: either
+    tags: [geometry]
+  - id: triangle_inequality
+    file: ../tasks/triangle_inequality.feature
+    expected: either
+    tags: [analysis]
+  - id: elastic_collision
+    file: ../tasks/elastic_collision.feature
+    expected: either
+    tags: [physics]
+  - id: forthel_demo
+    file: ../tasks/forthel_demo.feature
+    expected: either
+    tags: [forthel]
+  - id: forthel_to_lean
+    file: ../tasks/forthel_to_lean.feature
+    expected: either
+    tags: [forthel, lean]
+  - id: gauss_sum_rerun
+    file: ../tasks/gauss_sum.feature
+    expected: either
+    tags: [arithmetic, duplicate]
+  - id: am_gm_rerun
+    file: ../tasks/am_gm_inequality.feature
+    expected: either
+    tags: [inequality, duplicate]
+  - id: pythagoras_rerun
+    file: ../tasks/pythagoras.feature
+    expected: either
+    tags: [geometry, duplicate]

@@ -1,0 +1,24 @@
+suite_id: smoke
+description: |
+  Fast smoke: NullProver + oracle, no Lean toolchain. Finishes in seconds in CI.
+tasks:
+  - id: gauss_sum
+    file: ../tasks/gauss_sum.feature
+    expected: either
+    tags: [arithmetic, smoke]
+  - id: am_gm_2var
+    file: ../tasks/am_gm_inequality.feature
+    expected: either
+    tags: [inequality, smoke]
+  - id: pythagoras
+    file: ../tasks/pythagoras.feature
+    expected: either
+    tags: [geometry, smoke]
+  - id: triangle_inequality
+    file: ../tasks/triangle_inequality.feature
+    expected: either
+    tags: [analysis, smoke]
+  - id: elastic_collision
+    file: ../tasks/elastic_collision.feature
+    expected: either
+    tags: [physics, smoke]
