@@ -9,6 +9,8 @@ import sys
 from decimal import Decimal
 from pathlib import Path
 
+import httpx
+
 from kalinov.bridges.forthel_lean import TranslationOutcomeKind, translate_step
 from kalinov.eval.cli_impl import run_eval
 from kalinov.gherkin import parse_feature_file
@@ -27,6 +29,7 @@ from kalinov.llm.config import ConfigError
 from kalinov.llm.config import load_config as load_llm_config
 from kalinov.llm.factory import make_client
 from kalinov.llm.run_report import run_cost_report
+from kalinov.mining import MiningConfig, MiningError, mine
 from kalinov.oracle import OracleConfig, OracleLoop, OracleOutcome, OracleOutcomeKind
 from kalinov.provers import (
     NullProver,
@@ -396,6 +399,44 @@ def _run_solve(args: argparse.Namespace) -> int:
     return asyncio.run(_solve_async(args))
 
 
+def _run_mine(args: argparse.Namespace) -> int:
+    if not args.network:
+        print(
+            "Mining is gated behind --network; run with --network to proceed.",
+            file=sys.stderr,
+        )
+        return 4
+    cfg = MiningConfig(
+        source_name=args.source,
+        query=args.query,
+        limit=args.limit,
+        extractor_name=args.extractor,
+        out_dir=Path(args.out),
+        feature_name=args.feature_name,
+        network_enabled=True,
+    )
+    runs_dir = Path(args.runs_dir)
+
+    async def run_inner() -> tuple[Path, ...]:
+        with start_run(runs_dir=runs_dir):
+            return await mine(cfg)
+
+    try:
+        paths = asyncio.run(run_inner())
+    except MiningError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    except httpx.HTTPError as exc:
+        print(f"error: HTTP fetch failed: {exc}", file=sys.stderr)
+        return 1
+
+    for path in paths:
+        text = path.read_text(encoding="utf-8")
+        n = sum(1 for line in text.splitlines() if line.lstrip().startswith("Scenario:"))
+        print(f"{path} candidates={n}")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="kalinov")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -603,6 +644,43 @@ def main(argv: list[str] | None = None) -> int:
         help="Root for per-task eval telemetry runs.",
     )
 
+    mine_p = sub.add_parser(
+        "mine",
+        help="Mine candidate .feature files from external sources (network opt-in).",
+    )
+    mine_p.add_argument("--source", type=str, required=True, help="Source id (e.g. arxiv).")
+    mine_p.add_argument("--query", type=str, required=True, help="Source-specific query string.")
+    mine_p.add_argument("--limit", type=int, default=10, metavar="N")
+    mine_p.add_argument(
+        "--extractor",
+        type=str,
+        default="heuristic",
+        help="Extractor name (default: heuristic).",
+    )
+    mine_p.add_argument(
+        "--out",
+        type=Path,
+        default=Path("corpus/mined"),
+        help="Output directory for .feature files.",
+    )
+    mine_p.add_argument(
+        "--feature-name",
+        type=str,
+        default="Mined claims",
+        help="Feature title used in emitted Gherkin.",
+    )
+    mine_p.add_argument(
+        "--network",
+        action="store_true",
+        help="Allow outbound HTTP (required; mining is off by default).",
+    )
+    mine_p.add_argument(
+        "--runs-dir",
+        type=Path,
+        default=Path("runs"),
+        help="Runs root for mining.jsonl telemetry.",
+    )
+
     args = parser.parse_args(argv)
     if args.command == "cost" and args.cost_command == "report":
         code, out = run_cost_report(
@@ -622,6 +700,8 @@ def main(argv: list[str] | None = None) -> int:
         return _run_solve(args)
     if args.command == "eval":
         return run_eval(args)
+    if args.command == "mine":
+        return _run_mine(args)
     return 2
 
 
