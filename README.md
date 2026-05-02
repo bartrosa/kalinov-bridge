@@ -85,10 +85,15 @@ If you use a small global script + aliases (e.g. `git feat my-task` → branch `
 
 The `kalinov mine` command is **opt-in** and **network-gated** (`--network`); it emits candidate Math-Gherkin files under `corpus/mined/` for manual editing before they are added to a benchmark suite. Conventions, attribution fields, and license responsibility are documented in [corpus/README.md](corpus/README.md).
 
+## MCP integration
+
+With the optional **`[mcp]`** extra, run **`kalinov mcp`** to expose the same operations as MCP tools and `runs/` telemetry as MCP resources (stdio by default). Install: `uv sync --extra mcp` or `pip install 'kalinov-bridge[mcp]'`. Full setup (Cursor, Claude Desktop, troubleshooting): [docs/mcp.md](docs/mcp.md).
+
 ## Docs
 
 - [Development setup](docs/development.md)
 - [Documentation index](docs/README.md)
+- [MCP server](docs/mcp.md)
 
 ## Contributing
 

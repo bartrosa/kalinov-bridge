@@ -5,6 +5,7 @@ Project is in **early scaffold**; deeper design docs will grow here.
 | Doc | Purpose |
 |-----|---------|
 | [development.md](development.md) | Local setup, hooks, `src/` package, `experiments/`, `lean/` + Lake |
+| [mcp.md](mcp.md) | Model Context Protocol server (`kalinov mcp`) |
 | [`lean/README.md`](../lean/README.md) | Lake + mathlib commands and layout |
 | *Architecture / ADRs* | To be added under `docs/adr/` once the Lean benchmark and public I/O spec stabilize |
 
