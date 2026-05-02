@@ -1,0 +1,31 @@
+# Model pricing (USD per million tokens unless noted). Money values are strings for Decimal.
+# openai_compat "*" is self-hosted / unknown — zero USD (see calculator).
+version: 1
+last_verified: "2026-04-24"
+providers:
+  anthropic:
+    claude-opus-4-7:
+      input_per_mtok: "15.00"
+      output_per_mtok: "75.00"
+      reasoning_per_mtok: "75.00"
+    claude-3-5-sonnet-20241022:
+      input_per_mtok: "3.00"
+      output_per_mtok: "15.00"
+      reasoning_per_mtok: "15.00"
+  openai:
+    gpt-4o:
+      input_per_mtok: "2.50"
+      output_per_mtok: "10.00"
+      reasoning_per_mtok: "10.00"
+    o1:
+      input_per_mtok: "15.00"
+      output_per_mtok: "60.00"
+      reasoning_per_mtok: "60.00"
+  gemini:
+    gemini-2.5-pro:
+      input_per_mtok: "1.25"
+      output_per_mtok: "10.00"
+      reasoning_per_mtok: "10.00"
+  openai_compat:
+    "*":
+      pricing_source: self_hosted
