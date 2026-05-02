@@ -13,6 +13,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `Prover` ABC with `compile`, `check`, `extract_obligations`, `parse_error`.
+- `NullProver` deterministic backend for testing (modes: always_ok, always_fail, fail_after_n).
+- `kalinov check` CLI subcommand.
+- Per-call prover telemetry written to `prover_calls.jsonl` on the active RunContext.
+- ADR-0004: Prover ABC frozen.
+- `MathTexInterpreter` — extracts inline and display LaTeX math from steps.
+- `ForTheLInterpreter` — degradation-tolerant bridge to a local Naproche binary, when present.
+- ADR-0001b: CNL-agnostic step body.
+- Gherkin frontend: parser (`kalinov.gherkin.parse_feature_file`, `parse_feature_text`) and typed AST.
+- Pluggable step interpretation: `StepInterpreter` ABC, `InterpreterChain`, `RawInterpreter`.
+- Five example `.feature` files under `examples/`.
 - `experiments/` directory for ad-hoc scripts (see `experiments/README.md`).
 - `lean/` Lake workspace with **mathlib** (`kalinov_bridge` package, `KalinovBridge` library) and CI job using **lean-action** + Mathlib cache.
 - **Makefile** (`make check`, `make run-demo`, …) delegating to `uv` and `lake`.
@@ -29,5 +40,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - CI workflow: Ruff, Mypy, Pytest on Ubuntu.
 - Initial `docs/` stub pointing to architecture notes on GitHub.
 
+## [0.0.1] — 2026-05-01
+
+### Added
+
+- Project bootstrap: `pyproject.toml` (uv), CI, ADRs 0001–0003, telemetry & cost primitives.
+
 [Unreleased]: https://github.com/bartrosa/kalinov-bridge/compare/v0.1.0...HEAD
 [0.1.0]: https://github.com/bartrosa/kalinov-bridge/releases/tag/v0.1.0
+[0.0.1]: https://github.com/bartrosa/kalinov-bridge/releases/tag/v0.0.1

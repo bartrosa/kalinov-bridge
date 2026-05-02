@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "Benchmark harness: LLM-generated proofs verified by Lean 4 (early scaffold)."
 readme = "README.md"
 license = { text = "Apache-2.0" }
-requires-python = ">=3.12"
+requires-python = ">=3.11"
 authors = [{ name = "Bart Rosa", email = "contact@bartrosa.dev" }]
 keywords = ["lean4", "llm", "benchmark", "formal-verification"]
 classifiers = [
@@ -16,12 +16,16 @@ classifiers = [
     "Intended Audience :: Science/Research",
     "License :: OSI Approved :: Apache Software License",
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
 ]
-dependencies = []
+dependencies = [
+    "gherkin-official>=29.0",
+]
 
 [project.scripts]
+kalinov = "kalinov.cli:main"
 kalinov-bridge = "kalinov_bridge.cli:main"
 
 [project.urls]
@@ -37,10 +41,10 @@ dev = [
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/kalinov_bridge"]
+packages = ["src/kalinov", "src/kalinov_bridge"]
 
 [tool.ruff]
-target-version = "py312"
+target-version = "py311"
 line-length = 100
 extend-exclude = ["experiments"]
 
@@ -53,10 +57,10 @@ pythonpath = ["src"]
 addopts = "-q"
 
 [tool.mypy]
-python_version = "3.12"
+python_version = "3.11"
 strict = true
 explicit_package_bases = true
-packages = ["kalinov_bridge"]
+packages = ["kalinov", "kalinov_bridge"]
 mypy_path = "src"
 
 [[tool.mypy.overrides]]
