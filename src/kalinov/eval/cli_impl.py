@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import sys
+from dataclasses import dataclass
 from decimal import Decimal
 from pathlib import Path
 
@@ -116,8 +117,9 @@ async def _eval_async(
     runs_dir: Path,
     out_dir: Path,
     formats: tuple[str, ...],
-) -> bool:
-    """Return True when any obligation ended in LLM_ERROR or BUDGET_EXCEEDED."""
+    silent: bool = False,
+) -> tuple[bool, list[RunResult], dict[str, Path], str]:
+    """Return hard_failure, results, report paths, markdown summary."""
     try:
         llm_cfg = load_llm_config(llm_config_path)
     except ConfigError as exc:
@@ -151,9 +153,61 @@ async def _eval_async(
                 if o.kind in (OracleOutcomeKind.LLM_ERROR, OracleOutcomeKind.BUDGET_EXCEEDED):
                     hard_failure = True
 
-    write_report(results, out_dir=out_dir, formats=formats)
-    print(render_markdown(results), end="")
-    return hard_failure
+    written = dict(write_report(results, out_dir=out_dir, formats=formats))
+    md = render_markdown(results)
+    if not silent:
+        print(md, end="")
+    return hard_failure, results, written, md
+
+
+@dataclass(frozen=True, slots=True)
+class EvalProgrammaticResult:
+    run_ids: tuple[str, ...]
+    report_paths: dict[str, str]
+    summary_markdown: str
+    total_cost_usd: str
+    hard_failure: bool
+
+
+async def run_eval_programmatic(
+    suite_path: Path,
+    matrix: ConfigMatrix,
+    *,
+    llm_config_path: Path | None,
+    cache: LLMCache | None,
+    budget: Budget | None,
+    runs_dir: Path,
+    out_dir: Path,
+    formats: tuple[str, ...],
+) -> EvalProgrammaticResult:
+    """Like ``run_eval`` but returns structured data (no stdout)."""
+    hf, results, written, md = await _eval_async(
+        suite_path,
+        matrix,
+        llm_config_path=llm_config_path,
+        cache=cache,
+        budget=budget,
+        runs_dir=runs_dir,
+        out_dir=out_dir,
+        formats=formats,
+        silent=True,
+    )
+    seen: set[str] = set()
+    run_ids_list: list[str] = []
+    for rr in results:
+        for tr in rr.task_results:
+            rid = tr.telemetry_run_id
+            if rid not in seen:
+                seen.add(rid)
+                run_ids_list.append(rid)
+    total = sum((tr.total_cost_usd for rr in results for tr in rr.task_results), Decimal("0"))
+    return EvalProgrammaticResult(
+        run_ids=tuple(run_ids_list),
+        report_paths={k: str(v) for k, v in written.items()},
+        summary_markdown=md,
+        total_cost_usd=str(total),
+        hard_failure=hf,
+    )
 
 
 def run_eval(args: argparse.Namespace) -> int:
@@ -195,7 +249,7 @@ def run_eval(args: argparse.Namespace) -> int:
         if not formats:
             formats = ("json", "md")
 
-        hard_fail = asyncio.run(
+        hard_fail, _, _, _ = asyncio.run(
             _eval_async(
                 suite_path,
                 matrix,
@@ -205,6 +259,7 @@ def run_eval(args: argparse.Namespace) -> int:
                 runs_dir=runs_dir,
                 out_dir=out_dir,
                 formats=formats,
+                silent=False,
             ),
         )
         return 1 if hard_fail else 0
@@ -216,4 +271,4 @@ def run_eval(args: argparse.Namespace) -> int:
         return 2
 
 
-__all__ = ["run_eval"]
+__all__ = ["EvalProgrammaticResult", "run_eval", "run_eval_programmatic"]
