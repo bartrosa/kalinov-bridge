@@ -72,7 +72,7 @@ def test_no_forthel_does_not_call_translate(
         msg = "translate_step should not run with --no-forthel"
         raise AssertionError(msg)
 
-    monkeypatch.setattr("kalinov.cli.translate_step", _boom)
+    monkeypatch.setattr("kalinov.cli_core.translate_step", _boom)
 
     feat = _write(tmp_path, lean_tag=True, forthel=True)
     rc = main(
@@ -109,7 +109,7 @@ def test_forthel_bridge_runs_without_flag(
             diagnostic=None,
         )
 
-    monkeypatch.setattr("kalinov.cli.translate_step", _translate)
+    monkeypatch.setattr("kalinov.cli_core.translate_step", _translate)
 
     feat = _write(tmp_path, lean_tag=False, forthel=True)
     rc = main(["check", "--prover", "lean4", str(feat), "--runs-dir", str(tmp_path / "runs")])
@@ -127,7 +127,7 @@ def test_skip_line_on_translation_skipped(
     monkeypatch.setattr(LeanProver, "check", _check_always_ok)
 
     monkeypatch.setattr(
-        "kalinov.cli.translate_step",
+        "kalinov.cli_core.translate_step",
         lambda *_a, **_k: TranslationOutcome(
             kind=TranslationOutcomeKind.SKIPPED,
             lean_source=None,
@@ -153,7 +153,7 @@ def test_failed_translation_exits_nonzero(
     monkeypatch.setattr(LeanProver, "check", _check_always_ok)
 
     monkeypatch.setattr(
-        "kalinov.cli.translate_step",
+        "kalinov.cli_core.translate_step",
         lambda *_a, **_k: TranslationOutcome(
             kind=TranslationOutcomeKind.FAILED,
             lean_source=None,
@@ -184,7 +184,7 @@ def test_dedup_lean_obligation_after_bridge_ok(
     monkeypatch.setattr(LeanProver, "check", _check)
 
     monkeypatch.setattr(
-        "kalinov.cli.translate_step",
+        "kalinov.cli_core.translate_step",
         lambda *_a, **_k: TranslationOutcome(
             kind=TranslationOutcomeKind.OK,
             lean_source="#check True",
@@ -207,7 +207,7 @@ def test_null_prover_does_not_call_translate_step(
     def _translate(*_a: Any, **_k: Any) -> TranslationOutcome:
         raise AssertionError("translate_step must not run with --prover null")
 
-    monkeypatch.setattr("kalinov.cli.translate_step", _translate)
+    monkeypatch.setattr("kalinov.cli_core.translate_step", _translate)
 
     feat = _write(tmp_path, lean_tag=True, forthel=True)
     rc = main(["check", "--prover", "null", str(feat), "--runs-dir", str(tmp_path / "runs")])

@@ -4,217 +4,28 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import json
 import sys
-from decimal import Decimal
 from pathlib import Path
 
 import httpx
 
-from kalinov.bridges.forthel_lean import TranslationOutcomeKind, translate_step
-from kalinov.eval.cli_impl import run_eval
-from kalinov.gherkin import parse_feature_file
-from kalinov.gherkin.errors import GherkinParseError
-from kalinov.interpreters import (
-    ForTheLInterpreter,
-    InterpreterChain,
-    MathTexInterpreter,
-    RawInterpreter,
+from kalinov.cli_core import (
+    ClientConfigError,
+    check_exit_code,
+    run_check_programmatic,
+    run_solve_programmatic,
+    solve_exit_code,
 )
-from kalinov.interpreters.base import InterpretedStep
-from kalinov.llm.budget import Budget, BudgetGuard
-from kalinov.llm.budget_context import set_budget_guard
+from kalinov.eval.cli_impl import run_eval
 from kalinov.llm.cache import CacheMode, LLMCache
 from kalinov.llm.config import ConfigError
-from kalinov.llm.config import load_config as load_llm_config
-from kalinov.llm.factory import make_client
 from kalinov.llm.run_report import run_cost_report
+from kalinov.mcp_cli import run_mcp_main
 from kalinov.mining import MiningConfig, MiningError, mine
-from kalinov.oracle import OracleConfig, OracleLoop, OracleOutcome, OracleOutcomeKind
-from kalinov.provers import (
-    NullProver,
-    NullProverConfig,
-    NullProverMode,
-    ProofArtifact,
-    ProofObligation,
-)
-from kalinov.provers.base import Prover, SpecDocument
-from kalinov.provers.errors import ProverError
+from kalinov.provers import NullProver, NullProverConfig, NullProverMode
+from kalinov.provers.base import Prover
 from kalinov.provers.lean import LeanProver, ToolchainNotFoundError, detect_toolchain
 from kalinov.telemetry import start_run
-
-
-def _scenario_has_lean_tag(tags: tuple[str, ...]) -> bool:
-    return any(t.strip().lower() == "@lean" for t in tags)
-
-
-def _interpret_chain() -> InterpreterChain:
-    return InterpreterChain(
-        [
-            MathTexInterpreter(),
-            ForTheLInterpreter(),
-            RawInterpreter(),
-        ],
-    )
-
-
-def _run_checks(
-    prover: Prover,
-    paths: list[Path],
-    artifact_language: str,
-    runs_dir: Path,
-    *,
-    forthel_bridge: bool = False,
-) -> int:
-    chain = _interpret_chain()
-    total_ok = 0
-    total_fail = 0
-    total_obligations = 0
-    parse_failed = False
-
-    with start_run(runs_dir=runs_dir) as run:
-        for path in paths:
-            try:
-                ff = parse_feature_file(path)
-            except GherkinParseError as exc:
-                print(f"parse error in {path}: {exc}", file=sys.stderr)
-                parse_failed = True
-                continue
-
-            interpreted: list[InterpretedStep] = []
-            for scenario in ff.feature.scenarios:
-                for step in scenario.steps:
-                    interpreted.append(chain.interpret(step))
-
-            spec = SpecDocument(
-                feature_file=ff,
-                interpreted_steps=tuple(interpreted),
-            )
-
-            skip_obligation_names: set[str] = set()
-
-            if forthel_bridge and isinstance(prover, LeanProver):
-                it = iter(spec.interpreted_steps)
-                broken = False
-                for scenario in ff.feature.scenarios:
-                    if broken:
-                        break
-                    for step_idx, _step in enumerate(scenario.steps):
-                        try:
-                            interp = next(it)
-                        except StopIteration:
-                            print(
-                                f"parse error in {path}: "
-                                "interpreted_steps shorter than scenario step walk",
-                                file=sys.stderr,
-                            )
-                            parse_failed = True
-                            broken = True
-                            break
-
-                        name = f"{scenario.name}#{step_idx}"
-                        lean_here = _scenario_has_lean_tag(scenario.tags)
-
-                        if interp.interpreter_name == "forthel" and interp.kind == "claim":
-                            tout = translate_step(interp)
-                            if tout.kind == TranslationOutcomeKind.SKIPPED:
-                                print(f"SKIP FORTHEL {name}: {tout.diagnostic}")
-                            elif tout.kind == TranslationOutcomeKind.FAILED:
-                                total_fail += 1
-                                msg = tout.diagnostic or "forthel translation failed"
-                                print(f"FAIL {name}: {msg}")
-                                if lean_here:
-                                    skip_obligation_names.add(name)
-                            else:
-                                obl = ProofObligation(
-                                    name=name,
-                                    statement=interp.original.text,
-                                    hypotheses=(),
-                                    metadata={},
-                                )
-                                artifact = ProofArtifact(
-                                    obligation=obl,
-                                    body=tout.lean_source or "",
-                                    language=artifact_language,
-                                    metadata={},
-                                )
-                                result = prover.check(artifact)
-                                total_obligations += 1
-                                if result.ok:
-                                    total_ok += 1
-                                    print(f"OK {obl.name}")
-                                else:
-                                    total_fail += 1
-                                    msg = (
-                                        result.diagnostics[0].message
-                                        if result.diagnostics
-                                        else "check failed"
-                                    )
-                                    print(f"FAIL {obl.name}: {msg}")
-                                if lean_here:
-                                    skip_obligation_names.add(name)
-                    if broken:
-                        break
-
-                if not broken:
-                    try:
-                        next(it)
-                    except StopIteration:
-                        pass
-                    else:
-                        print(
-                            f"parse error in {path}: "
-                            "interpreted_steps longer than scenario step walk",
-                            file=sys.stderr,
-                        )
-                        parse_failed = True
-                        broken = True
-
-                if broken:
-                    continue
-
-            try:
-                obligations = prover.extract_obligations(spec)
-            except ProverError as exc:
-                print(f"error in {path}: {exc}", file=sys.stderr)
-                parse_failed = True
-                continue
-
-            for obl in obligations:
-                if obl.name in skip_obligation_names:
-                    continue
-                total_obligations += 1
-                artifact = ProofArtifact(
-                    obligation=obl,
-                    body="",
-                    language=artifact_language,
-                    metadata={},
-                )
-                result = prover.check(artifact)
-                if result.ok:
-                    total_ok += 1
-                    print(f"OK {obl.name}")
-                else:
-                    total_fail += 1
-                    msg = result.diagnostics[0].message if result.diagnostics else "check failed"
-                    print(f"FAIL {obl.name}: {msg}")
-
-        print()
-        print(
-            "summary:",
-            f"obligations={total_obligations}",
-            f"pass={total_ok}",
-            f"fail={total_fail}",
-            f"run_id={run.run_id}",
-            f"telemetry_dir={run.run_dir}",
-            sep=" ",
-        )
-
-    if parse_failed:
-        return 2
-    if total_fail > 0:
-        return 1
-    return 0
 
 
 def _parse_files(args: argparse.Namespace) -> int:
@@ -237,7 +48,8 @@ def _parse_files(args: argparse.Namespace) -> int:
             fail_after=args.fail_after,
         )
         prover: Prover = NullProver(cfg)
-        return _run_checks(prover, paths, "null", runs_dir, forthel_bridge=False)
+        res = run_check_programmatic(prover, paths, "null", runs_dir, forthel_bridge=False)
+        return check_exit_code(res)
 
     if args.prover == "lean4":
         try:
@@ -247,20 +59,17 @@ def _parse_files(args: argparse.Namespace) -> int:
             return 3
         prover = LeanProver(toolchain=tc)
         use_bridge = not args.no_forthel
-        return _run_checks(prover, paths, "lean4", runs_dir, forthel_bridge=use_bridge)
+        res = run_check_programmatic(
+            prover,
+            paths,
+            "lean4",
+            runs_dir,
+            forthel_bridge=use_bridge,
+        )
+        return check_exit_code(res)
 
     print(f"error: unknown prover {args.prover!r}", file=sys.stderr)
     return 2
-
-
-def _oracle_line(o: OracleOutcome) -> str:
-    k = len(o.attempts)
-    cost_s = f"${o.total_cost_usd}"
-    name = o.obligation.name
-    if o.kind is OracleOutcomeKind.SOLVED:
-        return f"{name}: SOLVED in {k} iterations, {cost_s}"
-    reason = o.diagnostic or ""
-    return f"{name}: {o.kind.value.upper()} after {k} iterations: {reason}"
 
 
 async def _solve_async(args: argparse.Namespace) -> int:
@@ -281,118 +90,32 @@ async def _solve_async(args: argparse.Namespace) -> int:
         cache = LLMCache(Path(args.cache_dir), mode=CacheMode(args.cache_mode))
 
     try:
-        llm_cfg = load_llm_config(args.llm_config)
+        res = await run_solve_programmatic(
+            paths=paths,
+            runs_dir=runs_dir,
+            prover_name=args.prover,
+            provider=args.provider,
+            model=args.model,
+            llm_config_path=args.llm_config,
+            cache=cache,
+            max_repair_attempts=args.max_repair_attempts,
+            max_tokens=args.max_tokens,
+            temperature=args.temperature,
+            save_transcripts=args.save_transcripts,
+            max_cost_usd=args.max_cost_usd,
+            echo=True,
+        )
     except ConfigError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
-
-    if args.provider not in llm_cfg.providers:
-        print(f"error: unknown provider {args.provider!r}", file=sys.stderr)
-        return 2
-    prov_entry = llm_cfg.providers[args.provider]
-    model = args.model or prov_entry.default_model
-
-    if args.prover == "lean4":
-        try:
-            tc = detect_toolchain()
-        except ToolchainNotFoundError as exc:
-            print(str(exc), file=sys.stderr)
-            return 3
-        prover: Prover = LeanProver(toolchain=tc)
-    else:
-        prover = NullProver(NullProverConfig(mode=NullProverMode.ALWAYS_OK))
-
-    oc = OracleConfig(
-        max_repair_attempts=args.max_repair_attempts,
-        max_tokens_per_call=args.max_tokens,
-        temperature=args.temperature,
-        save_transcripts=args.save_transcripts,
-    )
-
-    max_cost: Decimal | None = None
-    if args.max_cost_usd is not None:
-        max_cost = Decimal(str(args.max_cost_usd))
-
-    try:
-        client = make_client(args.provider, config=llm_cfg, cache=cache)
-    except ConfigError as exc:
+    except ClientConfigError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 3
+    except ToolchainNotFoundError as exc:
+        print(str(exc), file=sys.stderr)
+        return 3
 
-    chain = _interpret_chain()
-    parse_failed = False
-    obligations_total = 0
-    solved = 0
-    sum_usd = Decimal("0")
-
-    with start_run(runs_dir=runs_dir) as run:
-        guard: BudgetGuard | None = None
-        if max_cost is not None:
-            guard = BudgetGuard(Budget(max_cost_usd=max_cost))
-        set_budget_guard(guard)
-        try:
-            loop = OracleLoop(prover=prover, llm=client, model=model, config=oc)
-            for path in paths:
-                try:
-                    ff = parse_feature_file(path)
-                except GherkinParseError as exc:
-                    print(f"parse error in {path}: {exc}", file=sys.stderr)
-                    parse_failed = True
-                    continue
-
-                interpreted: list[InterpretedStep] = []
-                for scenario in ff.feature.scenarios:
-                    for step in scenario.steps:
-                        interpreted.append(chain.interpret(step))
-
-                spec = SpecDocument(
-                    feature_file=ff,
-                    interpreted_steps=tuple(interpreted),
-                )
-                try:
-                    obligations = prover.extract_obligations(spec)
-                except ProverError as exc:
-                    print(f"error in {path}: {exc}", file=sys.stderr)
-                    parse_failed = True
-                    continue
-
-                for obl in obligations:
-                    obligations_total += 1
-                    out = await loop.run(obl)
-                    print(_oracle_line(out))
-                    sum_usd += out.total_cost_usd
-                    if out.kind is OracleOutcomeKind.SOLVED:
-                        solved += 1
-        finally:
-            set_budget_guard(None)
-
-        manifest = {
-            "run_id": run.run_id,
-            "total_cost_usd": str(sum_usd),
-            "obligations_total": obligations_total,
-            "obligations_solved": solved,
-        }
-        (run.run_dir / "manifest.json").write_text(
-            json.dumps(manifest, indent=2, sort_keys=True) + "\n",
-            encoding="utf-8",
-        )
-
-        print()
-        print(
-            "summary:",
-            f"obligations={obligations_total}",
-            f"solved={solved}",
-            f"total_usd={sum_usd}",
-            f"run_id={run.run_id}",
-            f"telemetry_dir={run.run_dir}",
-            sep=" ",
-        )
-
-    if parse_failed:
-        return 2
-    if solved < obligations_total:
-        return 1
-    return 0
+    return solve_exit_code(res)
 
 
 def _run_solve(args: argparse.Namespace) -> int:
@@ -681,6 +404,38 @@ def main(argv: list[str] | None = None) -> int:
         help="Runs root for mining.jsonl telemetry.",
     )
 
+    mcp_p = sub.add_parser(
+        "mcp",
+        help="Run the Model Context Protocol server (requires kalinov-bridge[mcp]).",
+    )
+    mcp_p.add_argument(
+        "--transport",
+        choices=["stdio", "streamable-http"],
+        default="stdio",
+        help="Transport (default: stdio for local tools like Cursor).",
+    )
+    mcp_p.add_argument(
+        "--host",
+        type=str,
+        default="127.0.0.1",
+        help="Bind host for streamable-http (default 127.0.0.1).",
+    )
+    mcp_p.add_argument("--port", type=int, default=8765, help="Port for streamable-http.")
+    mcp_p.add_argument("--runs-dir", type=Path, default=Path("runs"))
+    mcp_p.add_argument("--cache-dir", type=Path, default=None)
+    mcp_p.add_argument(
+        "--cache-mode",
+        choices=["read_write", "read_only", "off"],
+        default="read_write",
+    )
+    mcp_p.add_argument("--config", type=Path, default=None, dest="kalinov_config")
+    mcp_p.add_argument("--max-cost-usd", type=str, default=None)
+    mcp_p.add_argument(
+        "--allow-public",
+        action="store_true",
+        help="Allow binding streamable-http to 0.0.0.0 (dangerous).",
+    )
+
     args = parser.parse_args(argv)
     if args.command == "cost" and args.cost_command == "report":
         code, out = run_cost_report(
@@ -702,6 +457,8 @@ def main(argv: list[str] | None = None) -> int:
         return run_eval(args)
     if args.command == "mine":
         return _run_mine(args)
+    if args.command == "mcp":
+        return run_mcp_main(args)
     return 2
 
 
