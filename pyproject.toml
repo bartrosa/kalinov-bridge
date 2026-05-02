@@ -25,6 +25,7 @@ dependencies = [
 ]
 
 [project.scripts]
+kalinov = "kalinov.cli:main"
 kalinov-bridge = "kalinov_bridge.cli:main"
 
 [project.urls]
