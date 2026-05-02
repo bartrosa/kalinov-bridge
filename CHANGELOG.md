@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `kalinov.bridges.forthel_lean`: ForTheL → Lean translation pipeline (`translate_step`, `translate_spec`, telemetry to `forthel_translations.jsonl`, 32 KiB cap on captured Naproche output).
+- `kalinov check --prover lean4 --no-forthel` to disable the ForTheL bridge; default Lean CLI passes ForTheL claims through Naproche (`--lean` after the temp `.ftl`) before `LeanProver.check`, deduped with `extract_obligations` when scenarios are tagged `@lean`.
 - `LeanProver` adapter using a vendored Lean 4 runtime project with mathlib.
 - Lean error output parser into structured diagnostics.
 - `kalinov check --prover lean4` CLI.

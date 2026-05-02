@@ -51,6 +51,12 @@ For the real Lean backend you need **[elan](https://github.com/leanprover/elan)*
 
 Exit code **3** means the toolchain was not found; the CLI prints a short elan install hint. Telemetry for each call is written under `runs/<run_id>/prover_calls.jsonl` when using the default runs directory.
 
+### ForTheL → Lean bridge
+
+For steps that the ForTheL interpreter classifies as claims, `kalinov check --prover lean4` can run a **Naproche** subprocess (default: `naproche <tmp.ftl> --lean`) to obtain Lean text, then pass that to `LeanProver.check`. Outcomes are recorded in `runs/<run_id>/forthel_translations.jsonl` (per-step outcome, duration, exit code, captured output size; Naproche output is truncated at 32 KiB). If translation is **skipped** (e.g. Naproche not on `PATH`), the CLI prints a `SKIP FORTHEL …` line and does not treat that as a hard failure. If translation **fails** or the subsequent Lean check fails, the run fails (exit code 1). Use **`--no-forthel`** to turn off the bridge and rely only on the usual Lean obligation path (so ForTheL claims are not translated via Naproche).
+
+Example: [`examples/forthel_to_lean.feature`](examples/forthel_to_lean.feature).
+
 ## Quick start
 
 ```bash
