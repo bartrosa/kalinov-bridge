@@ -6,9 +6,13 @@ import time
 from collections.abc import Mapping
 from typing import Any
 
+from ulid import ULID
+
 from kalinov.cost.models import CostBreakdown, TokenUsage
 from kalinov.telemetry.context import active_run
 from kalinov.telemetry.jsonl import append_jsonl_record
+
+_LAST_LLM_CALL_ID: str | None = None
 
 
 def log_llm_call(
@@ -21,13 +25,19 @@ def log_llm_call(
     cache_hit: bool,
     error_code: str | None,
     extras_summary: Mapping[str, Any],
-) -> None:
-    """Write one JSON line to ``runs/<run_id>/llm_calls.jsonl`` when a run is active."""
+) -> str | None:
+    """Write one JSON line to ``runs/<run_id>/llm_calls.jsonl`` when a run is active.
+
+    Returns the per-call ``call_id`` (ULID string) when a row was written.
+    """
+    global _LAST_LLM_CALL_ID
     ctx = active_run()
     if ctx is None:
-        return
+        return None
     path = ctx.run_dir / "llm_calls.jsonl"
+    call_id = str(ULID())
     record = {
+        "call_id": call_id,
         "ts_ms": int(time.time() * 1000),
         "provider": provider,
         "model_id_resolved": model_id_resolved,
@@ -53,6 +63,8 @@ def log_llm_call(
         "extras_summary": dict(extras_summary),
     }
     append_jsonl_record(path, record)
+    _LAST_LLM_CALL_ID = call_id
+    return call_id
 
 
 def extras_summary_from(mapping: Mapping[str, Any] | None) -> dict[str, Any]:
@@ -80,5 +92,11 @@ def token_usage_from_json(obj: Mapping[str, Any]) -> TokenUsage:
 __all__ = [
     "extras_summary_from",
     "log_llm_call",
+    "take_last_llm_call_id",
     "token_usage_from_json",
 ]
+
+
+def take_last_llm_call_id() -> str | None:
+    """Return the ``call_id`` from the most recent :func:`log_llm_call` in-process."""
+    return _LAST_LLM_CALL_ID
