@@ -22,6 +22,7 @@ classifiers = [
 ]
 dependencies = [
     "gherkin-official>=29.0",
+    "python-ulid>=2.0",
     "pyyaml>=6.0",
     "tenacity>=9.0",
 ]
@@ -70,7 +71,7 @@ select = ["E", "F", "I", "UP", "B", "SIM"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["src"]
+pythonpath = ["src", "."]
 addopts = ["-q", "-m", "not lean"]
 markers = [
     "lean: requires elan/lake and built provers/lean/runtime (see CI lean-prover job)",
