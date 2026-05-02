@@ -16,6 +16,7 @@ from kalinov.interpreters import (
     RawInterpreter,
 )
 from kalinov.interpreters.base import InterpretedStep
+from kalinov.llm.run_report import run_cost_report
 from kalinov.provers import (
     NullProver,
     NullProverConfig,
@@ -242,6 +243,46 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="kalinov")
     sub = parser.add_subparsers(dest="command", required=True)
 
+    cost = sub.add_parser("cost", help="Inspect recorded LLM spend.")
+    cost_sub = cost.add_subparsers(dest="cost_command", required=True)
+    cost_rep = cost_sub.add_parser("report", help="Aggregate llm_calls.jsonl under runs.")
+    cost_rep.add_argument(
+        "--runs-dir",
+        type=Path,
+        default=Path("runs"),
+        help="Runs root directory.",
+    )
+    cost_rep.add_argument("--run-id", type=str, default=None, help="Single run id folder.")
+    cost_rep.add_argument(
+        "--format",
+        choices=["text", "json"],
+        default="text",
+        dest="report_format",
+    )
+    grp = cost_rep.add_mutually_exclusive_group()
+    grp.add_argument(
+        "--by-provider",
+        action="store_const",
+        const="provider",
+        dest="group_by",
+        help="Group totals by provider name.",
+    )
+    grp.add_argument(
+        "--by-model",
+        action="store_const",
+        const="model",
+        dest="group_by",
+        help="Group totals by resolved model id.",
+    )
+    grp.add_argument(
+        "--by-day",
+        action="store_const",
+        const="day",
+        dest="group_by",
+        help="Group totals by UTC calendar day (from ts_ms).",
+    )
+    cost_rep.set_defaults(group_by="none")
+
     check = sub.add_parser("check", help="Parse features and run prover checks.")
     check.add_argument(
         "files",
@@ -276,6 +317,18 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     args = parser.parse_args(argv)
+    if args.command == "cost" and args.cost_command == "report":
+        code, out = run_cost_report(
+            runs_dir=args.runs_dir,
+            run_id=args.run_id,
+            fmt=args.report_format,
+            group_by=args.group_by,
+        )
+        if code != 0:
+            print("no matching runs under", args.runs_dir, file=sys.stderr)
+            return code
+        print(out, end="")
+        return 0
     if args.command == "check":
         return _parse_files(args)
     return 2
