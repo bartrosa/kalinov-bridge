@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Oracle loop: propose → verify → repair, parameterized by `Prover` and `LLMClient`.
+- `kalinov solve` CLI subcommand.
+- `oracle_loop.jsonl` telemetry stream linking LLM and prover call IDs.
+- Optional transcript persistence under `runs/<run_id>/transcripts/`.
 - Four LLM provider adapters: Anthropic, OpenAI, Gemini, `openai_compat` (local).
   All implement the frozen `LLMClient` ABC.
 - `kalinov.config.yaml` loader for named providers and models.
@@ -46,6 +50,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- LLM and prover telemetry now include a per-call ULID for join across streams.
 - Python package moved to `src/kalinov_bridge/` (src layout).
 
 ## [0.1.0] - 2025-03-19
