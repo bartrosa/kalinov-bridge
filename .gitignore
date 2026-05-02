@@ -208,6 +208,9 @@ artifacts/
 .cursorrules
 .cursor/rules/
 
+.mcp_smoke_runs/
+runs/
+
 # Marimo
 marimo/_static/
 marimo/_lsp/

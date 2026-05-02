@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- MCP server: `kalinov mcp` exposes solve / check / eval / mine /
+  `cost_report` as MCP tools and `runs/*` views as MCP resources.
+- Stdio transport (default) and Streamable HTTP transport.
+- `[mcp]` optional dependency extra (`mcp[cli]>=1.27.0`).
+- `docs/mcp.md` with Cursor and Claude Desktop integration snippets.
+- Smoke client script `scripts/mcp_smoke.py` for local server verification.
 - Mining pipeline skeleton: `Source` / `Extractor` / emit interfaces.
 - arXiv source (Atom API), with rate limiting.
 - Heuristic claim extractor (regex + keyword based).
@@ -58,10 +64,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Makefile** (`make check`, `make run-demo`, …) delegating to `uv` and `lake`.
 - Minimal **demo runner**: mock LLM (`by sorry` → `by trivial`), `lake build`, restore `lean/KalinovBridge/Scratch.lean`, write `artifacts/.../results.jsonl`; CLI `kalinov-bridge run-demo`.
 - **`experiments/hello_e2e.py`** — same E2E path as a runnable hello-world script.
-- Runner **artifacts** now include `*.patched.lean` (verified source) and `*.original.lean` (pre-run snapshot) beside `results.jsonl`.
 
 ### Changed
 
+- CLI commands (`solve`, `check`, `eval`, `mine`, `cost report`) were minimally
+  refactored to expose programmatic cores (`kalinov.cli_core`, eval helpers)
+  reusable by the MCP layer. Behaviour unchanged.
+- Runner **artifacts** now include `*.patched.lean` (verified source) and `*.original.lean` (pre-run snapshot) beside `results.jsonl`.
 - LLM and prover telemetry now include a per-call ULID for join across streams.
 - Python package moved to `src/kalinov_bridge/` (src layout).
 

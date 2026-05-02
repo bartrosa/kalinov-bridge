@@ -33,7 +33,7 @@ def test_solve_with_null_prover_always_ok(
     )
     client = FakeLLMClient()
     client.set_queue(["theorem ok := rfl"] * 10)
-    monkeypatch.setattr("kalinov.cli.make_client", lambda *_a, **_k: client)
+    monkeypatch.setattr("kalinov.cli_core.make_client", lambda *_a, **_k: client)
 
     runs = tmp_path / "runs"
     code = main(
@@ -77,7 +77,7 @@ def test_solve_with_budget_exceeded_exits_1(
     )
     client = FakeLLMClient()
     client.set_queue(["theorem ok := rfl"])
-    monkeypatch.setattr("kalinov.cli.make_client", lambda *_a, **_k: client)
+    monkeypatch.setattr("kalinov.cli_core.make_client", lambda *_a, **_k: client)
 
     runs = tmp_path / "runs"
     code = main(
