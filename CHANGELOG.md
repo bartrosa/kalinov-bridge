@@ -13,6 +13,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `Prover` ABC with `compile`, `check`, `extract_obligations`, `parse_error`.
+- `NullProver` deterministic backend for testing (modes: always_ok, always_fail, fail_after_n).
+- `kalinov check` CLI subcommand.
+- Per-call prover telemetry written to `prover_calls.jsonl` on the active RunContext.
+- ADR-0004: Prover ABC frozen.
 - `MathTexInterpreter` — extracts inline and display LaTeX math from steps.
 - `ForTheLInterpreter` — degradation-tolerant bridge to a local Naproche binary, when present.
 - ADR-0001b: CNL-agnostic step body.

@@ -29,3 +29,4 @@ Trade-offs and follow-ups.
 | ADR | Title |
 |-----|--------|
 | [0001b](0001b-cnl-agnostic-step-body.md) | CNL-agnostic step body |
+| [0004](0004-prover-abc-frozen.md) | Prover ABC frozen |
