@@ -7,12 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Changed
-
-- Python package moved to `src/kalinov_bridge/` (src layout).
-
 ### Added
 
+- Four LLM provider adapters: Anthropic, OpenAI, Gemini, `openai_compat` (local).
+  All implement the frozen `LLMClient` ABC.
+- `kalinov.config.yaml` loader for named providers and models.
+- Disk-backed response cache with `read_write` / `read_only` / `off` modes.
+- Budget guard (USD, tokens, call count) with structured `BudgetExceededError`.
+- `llm_calls.jsonl` telemetry stream with per-call `Decimal` cost fields.
+- `kalinov cost report` CLI with text and JSON output and optional grouping.
+- ADR-0006: LLM ABC frozen.
+- `kalinov.cost` pricing catalogue (`pricing.yaml`) and `Decimal`-only
+  :func:`kalinov.cost.estimate_cost`.
 - `kalinov.bridges.forthel_lean`: ForTheL → Lean translation pipeline (`translate_step`, `translate_spec`, telemetry to `forthel_translations.jsonl`, 32 KiB cap on captured Naproche output).
 - `kalinov check --prover lean4 --no-forthel` to disable the ForTheL bridge; default Lean CLI passes ForTheL claims through Naproche (`--lean` after the temp `.ftl`) before `LeanProver.check`, deduped with `extract_obligations` when scenarios are tagged `@lean`.
 - `LeanProver` adapter using a vendored Lean 4 runtime project with mathlib.
@@ -37,6 +43,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Minimal **demo runner**: mock LLM (`by sorry` → `by trivial`), `lake build`, restore `lean/KalinovBridge/Scratch.lean`, write `artifacts/.../results.jsonl`; CLI `kalinov-bridge run-demo`.
 - **`experiments/hello_e2e.py`** — same E2E path as a runnable hello-world script.
 - Runner **artifacts** now include `*.patched.lean` (verified source) and `*.original.lean` (pre-run snapshot) beside `results.jsonl`.
+
+### Changed
+
+- Python package moved to `src/kalinov_bridge/` (src layout).
 
 ## [0.1.0] - 2025-03-19
 
