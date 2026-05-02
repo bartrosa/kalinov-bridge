@@ -13,6 +13,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `MathTexInterpreter` — extracts inline and display LaTeX math from steps.
+- `ForTheLInterpreter` — degradation-tolerant bridge to a local Naproche binary, when present.
+- ADR-0001b: CNL-agnostic step body.
 - Gherkin frontend: parser (`kalinov.gherkin.parse_feature_file`, `parse_feature_text`) and typed AST.
 - Pluggable step interpretation: `StepInterpreter` ABC, `InterpreterChain`, `RawInterpreter`.
 - Five example `.feature` files under `examples/`.
