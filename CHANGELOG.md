@@ -13,6 +13,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `LeanProver` adapter using a vendored Lean 4 runtime project with mathlib.
+- Lean error output parser into structured diagnostics.
+- `kalinov check --prover lean4` CLI.
+- Dedicated CI job for Lean integration tests, gated behind elan setup.
+- ADR-0005: Lean toolchain choice and version pinning.
 - `Prover` ABC with `compile`, `check`, `extract_obligations`, `parse_error`.
 - `NullProver` deterministic backend for testing (modes: always_ok, always_fail, fail_after_n).
 - `kalinov check` CLI subcommand.

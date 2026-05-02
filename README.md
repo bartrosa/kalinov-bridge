@@ -33,6 +33,24 @@ flowchart LR
 - **Lean 4** + Lake — workspace under [`lean/`](lean/); CI runs `lake build` there via [lean-action](https://github.com/leanprover/lean-action) (with Mathlib cache). Details: [docs/development.md](docs/development.md).
 - **LLM API key** in the environment when you run experiments (e.g. `OPENAI_API_KEY`) — orchestration code is still minimal.
 
+### Lean integration (`kalinov check --prover lean4`)
+
+For the real Lean backend you need **[elan](https://github.com/leanprover/elan)** so `lean` and `lake` are on your `PATH` (one-line install: see [elan](https://github.com/leanprover/elan#installation)).
+
+1. Build the **vendored prover runtime** (first run compiles Mathlib; expect a long wait):
+
+   ```bash
+   cd provers/lean/runtime && lake build
+   ```
+
+2. Run checks on Gherkin examples (obligations are steps with `kind=claim` in scenarios tagged `@lean`):
+
+   ```bash
+   uv run kalinov check --prover lean4 examples/gauss_sum.feature --runs-dir runs
+   ```
+
+Exit code **3** means the toolchain was not found; the CLI prints a short elan install hint. Telemetry for each call is written under `runs/<run_id>/prover_calls.jsonl` when using the default runs directory.
+
 ## Quick start
 
 ```bash
