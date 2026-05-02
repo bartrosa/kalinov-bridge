@@ -30,3 +30,5 @@ Trade-offs and follow-ups.
 |-----|--------|
 | [0001b](0001b-cnl-agnostic-step-body.md) | CNL-agnostic step body |
 | [0004](0004-prover-abc-frozen.md) | Prover ABC frozen |
+| [0005](0005-lean-toolchain.md) | Lean toolchain for LeanProver |
+| [0006](0006-llm-abc-frozen.md) | LLMClient ABC frozen |

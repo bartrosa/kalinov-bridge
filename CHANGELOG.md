@@ -7,12 +7,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Changed
-
-- Python package moved to `src/kalinov_bridge/` (src layout).
-
 ### Added
 
+- Mining pipeline skeleton: `Source` / `Extractor` / emit interfaces.
+- arXiv source (Atom API), with rate limiting.
+- Heuristic claim extractor (regex + keyword based).
+- Feature file emitter with per-scenario attribution (`# @attribution` comments).
+- `kalinov mine` CLI, network-gated by default (`--network` to fetch).
+- `mining.jsonl` telemetry stream on the active run.
+- `corpus/README.md` documenting mining conventions and license responsibility.
+- Eval harness: suite YAML loader, `ConfigMatrix`, `EvalRunner`, pure `aggregate`
+  reducers, JSON + Markdown reports, and cross-run Markdown comparison helpers.
+- `kalinov eval` CLI (flag-based matrix or YAML experiment file + overrides).
+- Benchmark layouts under `evals/` (`suites/smoke`, `suites/lean_basic`) plus starter
+  experiment YAML under `experiments/`.
+- Oracle loop: propose → verify → repair, parameterized by `Prover` and `LLMClient`.
+- `kalinov solve` CLI subcommand.
+- `oracle_loop.jsonl` telemetry stream linking LLM and prover call IDs.
+- Optional transcript persistence under `runs/<run_id>/transcripts/`.
+- Four LLM provider adapters: Anthropic, OpenAI, Gemini, `openai_compat` (local).
+  All implement the frozen `LLMClient` ABC.
+- `kalinov.config.yaml` loader for named providers and models.
+- Disk-backed response cache with `read_write` / `read_only` / `off` modes.
+- Budget guard (USD, tokens, call count) with structured `BudgetExceededError`.
+- `llm_calls.jsonl` telemetry stream with per-call `Decimal` cost fields.
+- `kalinov cost report` CLI with text and JSON output and optional grouping.
+- ADR-0006: LLM ABC frozen.
+- `kalinov.cost` pricing catalogue (`pricing.yaml`) and `Decimal`-only
+  :func:`kalinov.cost.estimate_cost`.
+- `kalinov.bridges.forthel_lean`: ForTheL → Lean translation pipeline (`translate_step`, `translate_spec`, telemetry to `forthel_translations.jsonl`, 32 KiB cap on captured Naproche output).
+- `kalinov check --prover lean4 --no-forthel` to disable the ForTheL bridge; default Lean CLI passes ForTheL claims through Naproche (`--lean` after the temp `.ftl`) before `LeanProver.check`, deduped with `extract_obligations` when scenarios are tagged `@lean`.
+- `LeanProver` adapter using a vendored Lean 4 runtime project with mathlib.
+- Lean error output parser into structured diagnostics.
+- `kalinov check --prover lean4` CLI.
+- Dedicated CI job for Lean integration tests, gated behind elan setup.
+- ADR-0005: Lean toolchain choice and version pinning.
 - `Prover` ABC with `compile`, `check`, `extract_obligations`, `parse_error`.
 - `NullProver` deterministic backend for testing (modes: always_ok, always_fail, fail_after_n).
 - `kalinov check` CLI subcommand.
@@ -30,6 +59,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Minimal **demo runner**: mock LLM (`by sorry` → `by trivial`), `lake build`, restore `lean/KalinovBridge/Scratch.lean`, write `artifacts/.../results.jsonl`; CLI `kalinov-bridge run-demo`.
 - **`experiments/hello_e2e.py`** — same E2E path as a runnable hello-world script.
 - Runner **artifacts** now include `*.patched.lean` (verified source) and `*.original.lean` (pre-run snapshot) beside `results.jsonl`.
+
+### Changed
+
+- LLM and prover telemetry now include a per-call ULID for join across streams.
+- Python package moved to `src/kalinov_bridge/` (src layout).
 
 ## [0.1.0] - 2025-03-19
 

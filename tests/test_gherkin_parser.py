@@ -87,7 +87,7 @@ def test_parse_tags_propagate() -> None:
     ff = parse_feature_file(EXAMPLES_DIR / "gauss_sum.feature")
     assert ff.feature.tags == ("@math", "@arithmetic")
     sc = ff.feature.scenarios[0]
-    assert sc.tags == ("@step_series",)
+    assert sc.tags == ("@lean", "@step_series")
     assert sc.examples[0].tags == ("@first_rows",)
 
 
