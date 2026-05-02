@@ -13,6 +13,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Gherkin frontend: parser (`kalinov.gherkin.parse_feature_file`, `parse_feature_text`) and typed AST.
+- Pluggable step interpretation: `StepInterpreter` ABC, `InterpreterChain`, `RawInterpreter`.
+- Five example `.feature` files under `examples/`.
 - `experiments/` directory for ad-hoc scripts (see `experiments/README.md`).
 - `lean/` Lake workspace with **mathlib** (`kalinov_bridge` package, `KalinovBridge` library) and CI job using **lean-action** + Mathlib cache.
 - **Makefile** (`make check`, `make run-demo`, …) delegating to `uv` and `lake`.
@@ -29,5 +32,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - CI workflow: Ruff, Mypy, Pytest on Ubuntu.
 - Initial `docs/` stub pointing to architecture notes on GitHub.
 
+## [0.0.1] — 2026-05-01
+
+### Added
+
+- Project bootstrap: `pyproject.toml` (uv), CI, ADRs 0001–0003, telemetry & cost primitives.
+
 [Unreleased]: https://github.com/bartrosa/kalinov-bridge/compare/v0.1.0...HEAD
 [0.1.0]: https://github.com/bartrosa/kalinov-bridge/releases/tag/v0.1.0
+[0.0.1]: https://github.com/bartrosa/kalinov-bridge/releases/tag/v0.0.1
