@@ -1,0 +1,13 @@
+# Example: Lean 4 + one provider, multiple seeds. Requires local Lean toolchain.
+suite: ../evals/suites/lean_basic.yaml
+matrix:
+  provers: ["lean4"]
+  providers:
+    - { name: claude }
+  seeds: [1, 2, 3]
+  oracle_configs:
+    - max_repair_attempts: 5
+      temperature: 0.0
+out: ./reports/lean_basic_local
+budget:
+  max_cost_usd: "10.00"

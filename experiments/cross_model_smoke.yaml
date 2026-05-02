@@ -1,0 +1,13 @@
+# Example: compare two named providers on the smoke suite (edit provider names
+# to match your kalinov.config.yaml). Output under ./reports/cross_model_smoke
+suite: ../evals/suites/smoke.yaml
+matrix:
+  provers: ["null"]
+  providers:
+    - { name: claude }
+    - { name: gpt }
+  seeds: [42]
+  oracle_configs:
+    - max_repair_attempts: 3
+      temperature: 0.0
+out: ./reports/cross_model_smoke
