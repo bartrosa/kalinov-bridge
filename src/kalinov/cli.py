@@ -10,6 +10,7 @@ from decimal import Decimal
 from pathlib import Path
 
 from kalinov.bridges.forthel_lean import TranslationOutcomeKind, translate_step
+from kalinov.eval.cli_impl import run_eval
 from kalinov.gherkin import parse_feature_file
 from kalinov.gherkin.errors import GherkinParseError
 from kalinov.interpreters import (
@@ -533,6 +534,75 @@ def main(argv: list[str] | None = None) -> int:
         help="Optional path to kalinov.config.yaml (defaults to search path).",
     )
 
+    ev = sub.add_parser("eval", help="Run a benchmark suite across one or more LLM configurations.")
+    ev.add_argument(
+        "--suite",
+        type=Path,
+        default=None,
+        help="Path to suite YAML (required without --config-file).",
+    )
+    ev.add_argument(
+        "--config-file",
+        type=Path,
+        default=None,
+        help="Experiment YAML (suite + matrix + out); CLI flags override when set.",
+    )
+    ev.add_argument("--prover", choices=["null", "lean4"], default=None)
+    ev.add_argument(
+        "--provider",
+        action="append",
+        default=[],
+        metavar="PROVIDER_NAME",
+        help="LLM provider name from kalinov.config.yaml (repeat for several).",
+    )
+    ev.add_argument(
+        "--model",
+        type=str,
+        default=None,
+        help="Override model for all listed providers.",
+    )
+    ev.add_argument("--seed", action="append", type=int, default=[], dest="seed")
+    ev.add_argument("--max-repair-attempts", type=int, default=None, metavar="N")
+    ev.add_argument(
+        "--max-cost-usd",
+        type=str,
+        default=None,
+        metavar="D",
+        help="Run budget in USD (overrides experiment file).",
+    )
+    ev.add_argument("--max-tokens", type=int, default=None, metavar="N")
+    ev.add_argument("--temperature", type=float, default=None, metavar="T")
+    ev.add_argument("--cache-dir", type=Path, default=None)
+    ev.add_argument(
+        "--cache-mode",
+        choices=["read_write", "read_only", "off"],
+        default="off",
+    )
+    ev.add_argument(
+        "--out",
+        type=Path,
+        default=None,
+        help="Report output directory (required for flag-based invocations).",
+    )
+    ev.add_argument(
+        "--format",
+        type=str,
+        default="json,md",
+        help="Comma-separated report formats: json, md.",
+    )
+    ev.add_argument(
+        "--llm-config",
+        type=Path,
+        default=None,
+        help="Path to kalinov.config.yaml.",
+    )
+    ev.add_argument(
+        "--runs-dir",
+        type=Path,
+        default=Path("runs"),
+        help="Root for per-task eval telemetry runs.",
+    )
+
     args = parser.parse_args(argv)
     if args.command == "cost" and args.cost_command == "report":
         code, out = run_cost_report(
@@ -550,6 +620,8 @@ def main(argv: list[str] | None = None) -> int:
         return _parse_files(args)
     if args.command == "solve":
         return _run_solve(args)
+    if args.command == "eval":
+        return run_eval(args)
     return 2
 
 

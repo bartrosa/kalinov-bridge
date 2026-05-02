@@ -1,11 +1,12 @@
-"""Pytest configuration shared by LLM tests."""
+"""Shared pytest fixtures."""
 
 from __future__ import annotations
+
+from pathlib import Path
 
 import pytest
 
 
-@pytest.fixture(autouse=True)
-def _llm_single_retry(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Avoid long tenacity backoffs in adapter error-path tests."""
-    monkeypatch.setenv("LLM_MAX_RETRIES", "1")
+@pytest.fixture(scope="session")
+def repo_root() -> Path:
+    return Path(__file__).resolve().parents[1]
