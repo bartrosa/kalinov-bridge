@@ -13,6 +13,9 @@ concurrency:
 jobs:
   python:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12"]
     steps:
       - uses: actions/checkout@v4
 
@@ -22,7 +25,7 @@ jobs:
           enable-cache: true
 
       - name: Sync
-        run: uv sync --frozen --group dev
+        run: uv sync --frozen --group dev --python ${{ matrix.python-version }}
 
       - name: Ruff (lint)
         run: uv run ruff check .
