@@ -11,7 +11,7 @@ from kalinov.llm.base import BudgetExceededError
 from kalinov.llm.budget import Budget, BudgetGuard
 
 
-def _cost(usd: str) -> CostBreakdown:
+def _cost(usd: str, pricing_source: str = "catalogue") -> CostBreakdown:
     z = Decimal("0")
     d = Decimal(usd)
     return CostBreakdown(
@@ -21,7 +21,7 @@ def _cost(usd: str) -> CostBreakdown:
         reasoning_usd=z,
         cache_read_usd=z,
         cache_write_usd=z,
-        pricing_source="catalogue",
+        pricing_source=pricing_source,
     )
 
 
@@ -52,4 +52,37 @@ def test_state_snapshot() -> None:
     s = g.state
     assert s.calls == 1
     assert s.spent_usd == Decimal("1.5")
+    assert s.total_tokens == 5
+
+
+def test_unknown_pricing_with_cost_cap_refuses() -> None:
+    """A max_cost_usd cap must not be silently bypassed by unknown-priced calls.
+
+    Without this check, a single call whose model isn't in pricing.yaml records
+    $0 against the guard and the run keeps spending real money past the cap.
+    """
+    g = BudgetGuard(Budget(max_cost_usd=Decimal("1.00")))
+    with pytest.raises(BudgetExceededError, match="no pricing entry"):
+        g.record(
+            cost=_cost("0", pricing_source="unknown"),
+            usage=TokenUsage(input=1000, output=1000),
+            provider="openai",
+        )
+    # The refused call must NOT be counted (no state corruption).
+    s = g.state
+    assert s.calls == 0
+    assert s.spent_usd == Decimal("0")
+    assert s.total_tokens == 0
+
+
+def test_unknown_pricing_without_cost_cap_is_allowed() -> None:
+    """When no max_cost_usd is configured, unknown pricing is fine."""
+    g = BudgetGuard(Budget(max_total_tokens=100, max_calls=10))
+    g.record(
+        cost=_cost("0", pricing_source="unknown"),
+        usage=TokenUsage(input=2, output=3),
+        provider="openai",
+    )
+    s = g.state
+    assert s.calls == 1
     assert s.total_tokens == 5

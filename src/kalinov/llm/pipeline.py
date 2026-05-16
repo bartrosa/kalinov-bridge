@@ -113,6 +113,19 @@ def run_completion(
         model_id=result.model_id_resolved,
         catalogue=catalogue,
     )
+    # The provider often returns a date-versioned model id (e.g. "gpt-4o-2024-08-06")
+    # that doesn't match the alias users put in pricing.yaml ("gpt-4o"). Without this
+    # fallback every priced provider call collapses to pricing_source="unknown" /
+    # total_usd=0, and the run-wide max_cost_usd guard is silently bypassed.
+    if cost.pricing_source == "unknown" and model_alias != result.model_id_resolved:
+        fallback = estimate_cost(
+            result.usage,
+            provider=provider_catalog_key,
+            model_id=model_alias,
+            catalogue=catalogue,
+        )
+        if fallback.pricing_source != "unknown":
+            cost = fallback
 
     guard = active_budget_guard()
     if guard is not None:

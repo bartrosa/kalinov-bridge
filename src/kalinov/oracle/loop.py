@@ -175,6 +175,21 @@ class OracleLoop:
                     model_id=completion.model_id_resolved,
                     catalogue=self._catalogue,
                 )
+                # Mirror the pipeline alias fallback so total_cost_usd stays
+                # accurate when the provider returns a date-versioned model id
+                # that doesn't match pricing.yaml directly.
+                if (
+                    cost_br.pricing_source == "unknown"
+                    and self._model != completion.model_id_resolved
+                ):
+                    fallback = estimate_cost(
+                        completion.usage,
+                        provider=self._llm.provider_key,
+                        model_id=self._model,
+                        catalogue=self._catalogue,
+                    )
+                    if fallback.pricing_source != "unknown":
+                        cost_br = fallback
                 total_cost += cost_br.total_usd
 
             cost_usd_str = str(cost_br.total_usd) if cost_br is not None else None
