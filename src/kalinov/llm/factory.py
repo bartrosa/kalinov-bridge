@@ -79,6 +79,7 @@ def make_client(
             base_url=entry.base_url,
             catalogue=cat,
             cache=cache,
+            default_headers=extras_headers,
         )
 
     raise ConfigError(f"unsupported provider type {entry.type!r}")
