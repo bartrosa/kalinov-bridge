@@ -136,8 +136,14 @@ class OpenAIClient(LLMClient):
             reasoning = int(getattr(ctd, "reasoning_tokens", 0) or 0)
         comp = int(u.completion_tokens or 0)
         visible_out = max(comp - reasoning, 0)
+        # OpenAI's `prompt_tokens` is the *total* prompt count and already
+        # includes `prompt_tokens_details.cached_tokens`. Storing both would
+        # double-count the cached portion in cost estimation and in
+        # `usage.total_all()` (which feeds `BudgetGuard`'s token cap).
+        prompt = int(u.prompt_tokens or 0)
+        visible_in = max(prompt - cached, 0)
         usage = TokenUsage(
-            input=int(u.prompt_tokens or 0),
+            input=visible_in,
             output=visible_out,
             reasoning=reasoning,
             cache_read=cached,

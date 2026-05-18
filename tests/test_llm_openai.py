@@ -3,14 +3,18 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
+from decimal import Decimal
 from types import SimpleNamespace
 
 import httpx
 import openai
 import pytest
 
+from kalinov.cost.calculator import estimate_cost
 from kalinov.cost.catalogue import load_default_catalogue
-from kalinov.llm.base import LLMError, Message
+from kalinov.llm.base import BudgetExceededError, LLMError, Message
+from kalinov.llm.budget import Budget, BudgetGuard
+from kalinov.llm.budget_context import set_budget_guard
 from kalinov.llm.providers.openai_client import OpenAIClient
 
 
@@ -50,7 +54,10 @@ def test_usage_mapping(monkeypatch: pytest.MonkeyPatch) -> None:
         extras=None,
     )
     assert "4o" in out.model_id_resolved
-    assert out.usage.input == 5
+    # `prompt_tokens` (5) already contains `cached_tokens` (2). Storing both as
+    # `input` AND `cache_read` would double-count the cached portion in cost
+    # estimation and budget enforcement, so input must be `prompt - cached`.
+    assert out.usage.input == 3  # 5 prompt - 2 cached
     assert out.usage.cache_read == 2
     assert out.usage.reasoning == 3
     assert out.usage.output == 4  # 7 - 3 reasoning
@@ -123,6 +130,116 @@ def test_auth_error(monkeypatch: pytest.MonkeyPatch) -> None:
             extras=None,
         )
     assert ei.value.code == "auth"
+
+
+def test_cached_tokens_not_double_counted_in_cost_and_budget(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Regression: ``prompt_tokens`` includes ``cached_tokens``.
+
+    Pre-fix the adapter stored both as ``input`` (= ``prompt_tokens``) and
+    ``cache_read`` (= ``cached_tokens``), so:
+
+    * cost estimation billed the cached portion twice (once at the full
+      ``input_per_mtok`` rate, again at ``cache_read_per_mtok``);
+    * ``usage.total_all()`` was inflated, which made ``BudgetGuard``'s
+      ``max_total_tokens`` cap trip earlier than the user's real token spend.
+    """
+    cat = load_default_catalogue()
+    c = OpenAIClient(api_key="k", catalogue=cat)
+    # 4000-token prompt, 3000 of which were cached, plus 500 visible output.
+    resp = SimpleNamespace(
+        model="gpt-4o-2024-08-06",
+        choices=[SimpleNamespace(message=SimpleNamespace(content="hi"), finish_reason="stop")],
+        usage=_usage(prompt=4000, cached=3000, completion=500, reasoning=0),
+    )
+    monkeypatch.setattr(c._client.chat.completions, "create", lambda **kw: resp)
+    out = c.complete(
+        messages=[Message(role="user", content="x")],
+        model="gpt-4o",
+        max_tokens=1024,
+        temperature=0.0,
+        stop=None,
+        extras=None,
+    )
+
+    # Non-double-counted token bookkeeping.
+    assert out.usage.input == 1000  # 4000 - 3000 cached
+    assert out.usage.cache_read == 3000
+    assert out.usage.output == 500
+    # Real tokens the user paid for == prompt + visible_out == 4500.
+    assert out.usage.total_all() == 4500, (
+        f"total_all() must equal prompt + output (4500), not double-count "
+        f"cached tokens (would give 7500 pre-fix); got {out.usage.total_all()}"
+    )
+
+    # Cost estimate against bundled pricing (cache_read_per_mtok defaults to 0
+    # so cached portion is priced free, but the *uncached* input portion must
+    # not still be billed against the full 4000 prompt count).
+    cost = estimate_cost(
+        out.usage,
+        provider="openai",
+        model_id="gpt-4o",
+        catalogue=cat,
+    )
+    # 1000 * $2.50/M + 500 * $10.00/M = $0.0025 + $0.005 = $0.0075.
+    # Pre-fix this was $0.015 (4000 * $2.50/M + 500 * $10/M).
+    assert cost.total_usd == Decimal("0.007500"), cost.total_usd
+
+
+def test_cached_tokens_do_not_trip_budget_prematurely(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``BudgetGuard`` token cap must reflect real token consumption."""
+    cat = load_default_catalogue()
+    c = OpenAIClient(api_key="k", catalogue=cat)
+    resp = SimpleNamespace(
+        model="gpt-4o-2024-08-06",
+        choices=[SimpleNamespace(message=SimpleNamespace(content="ok"), finish_reason="stop")],
+        usage=_usage(prompt=4000, cached=3000, completion=500, reasoning=0),
+    )
+    monkeypatch.setattr(c._client.chat.completions, "create", lambda **kw: resp)
+
+    # Cap == real token consumption (4500). Pre-fix `total_all()` was 7500 so
+    # this single call would have raised; post-fix it must succeed.
+    guard = BudgetGuard(Budget(max_total_tokens=4500))
+    set_budget_guard(guard)
+    try:
+        c.complete(
+            messages=[Message(role="user", content="x")],
+            model="gpt-4o",
+            max_tokens=1024,
+            temperature=0.0,
+            stop=None,
+            extras=None,
+        )
+    finally:
+        set_budget_guard(None)
+    assert guard.state.total_tokens == 4500
+
+    # And the next equivalent call MUST trip the cap.
+    guard2 = BudgetGuard(Budget(max_total_tokens=4500))
+    set_budget_guard(guard2)
+    try:
+        c.complete(
+            messages=[Message(role="user", content="x")],
+            model="gpt-4o",
+            max_tokens=1024,
+            temperature=0.0,
+            stop=None,
+            extras=None,
+        )
+        with pytest.raises(BudgetExceededError):
+            c.complete(
+                messages=[Message(role="user", content="x")],
+                model="gpt-4o",
+                max_tokens=1024,
+                temperature=0.0,
+                stop=None,
+                extras=None,
+            )
+    finally:
+        set_budget_guard(None)
 
 
 def test_stream_yields_chunks(monkeypatch: pytest.MonkeyPatch) -> None:

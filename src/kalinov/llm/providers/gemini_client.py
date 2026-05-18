@@ -99,11 +99,15 @@ class GeminiClient(LLMClient):
         if resp.text:
             text = resp.text
         um = getattr(resp, "usage_metadata", None)
-        inp = int(getattr(um, "prompt_token_count", 0) or 0) if um else 0
+        prompt_tok = int(getattr(um, "prompt_token_count", 0) or 0) if um else 0
         out = int(getattr(um, "candidates_token_count", 0) or 0) if um else 0
         cached = int(getattr(um, "cached_content_token_count", 0) or 0) if um else 0
+        # `prompt_token_count` is the total prompt and includes
+        # `cached_content_token_count`. Subtract so we don't double-count the
+        # cached portion in cost estimation or `BudgetGuard`'s token cap.
+        visible_in = max(prompt_tok - cached, 0)
         usage = TokenUsage(
-            input=inp,
+            input=visible_in,
             output=out,
             reasoning=0,
             cache_read=cached,
