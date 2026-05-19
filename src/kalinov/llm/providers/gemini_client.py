@@ -102,10 +102,15 @@ class GeminiClient(LLMClient):
         inp = int(getattr(um, "prompt_token_count", 0) or 0) if um else 0
         out = int(getattr(um, "candidates_token_count", 0) or 0) if um else 0
         cached = int(getattr(um, "cached_content_token_count", 0) or 0) if um else 0
+        # Gemini 2.5+ thinking models report thinking tokens in a dedicated
+        # `thoughts_token_count` field, disjoint from `candidates_token_count`.
+        # They are billed at the same rate as output tokens but tracked separately.
+        # See https://ai.google.dev/gemini-api/docs/thinking for the schema.
+        thoughts = int(getattr(um, "thoughts_token_count", 0) or 0) if um else 0
         usage = TokenUsage(
             input=inp,
             output=out,
-            reasoning=0,
+            reasoning=thoughts,
             cache_read=cached,
             cache_write=0,
         )
