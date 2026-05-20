@@ -102,6 +102,11 @@ class GeminiClient(LLMClient):
         prompt_tok = int(getattr(um, "prompt_token_count", 0) or 0) if um else 0
         out = int(getattr(um, "candidates_token_count", 0) or 0) if um else 0
         cached = int(getattr(um, "cached_content_token_count", 0) or 0) if um else 0
+        # Gemini 2.5+ thinking models report thinking tokens in a dedicated
+        # `thoughts_token_count` field, disjoint from `candidates_token_count`.
+        # They are billed at the same rate as output tokens but tracked separately.
+        # See https://ai.google.dev/gemini-api/docs/thinking for the schema.
+        thoughts = int(getattr(um, "thoughts_token_count", 0) or 0) if um else 0
         # `prompt_token_count` is the total prompt and includes
         # `cached_content_token_count`. Subtract so we don't double-count the
         # cached portion in cost estimation or `BudgetGuard`'s token cap.
