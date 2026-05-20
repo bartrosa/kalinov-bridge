@@ -15,7 +15,7 @@ from kalinov.eval.matrix import ConfigMatrix
 from kalinov.eval.report import render_markdown, write_report
 from kalinov.eval.runner import EvalRunner, RunResult
 from kalinov.eval.suite import SuiteError, load_suite
-from kalinov.llm.budget import Budget
+from kalinov.llm.budget import Budget, BudgetGuard
 from kalinov.llm.cache import CacheMode, LLMCache
 from kalinov.llm.config import ConfigError
 from kalinov.llm.config import load_config as load_llm_config
@@ -132,6 +132,15 @@ async def _eval_async(
     results: list[RunResult] = []
     hard_failure = False
 
+    # Build ONE BudgetGuard for the whole matrix expansion. ``--max-cost-usd``
+    # / the YAML ``budget:`` block must cap cumulative spend across every
+    # config (provider × seed × oracle_config × prover); previously each
+    # iteration constructed a fresh :class:`EvalRunner` whose internally-built
+    # guard reset the spent_usd counter, so an experiment with N configs
+    # could be billed up to ``cap × N`` (e.g. the bundled
+    # ``experiments/lean_basic_local.yaml`` runs 3 seeds → 3× billing).
+    shared_guard: BudgetGuard | None = BudgetGuard(budget) if budget is not None else None
+
     for cfg in configs:
         if cfg.provider_name not in llm_cfg.providers:
             raise RuntimeError(f"unknown provider {cfg.provider_name!r}")
@@ -141,6 +150,7 @@ async def _eval_async(
             pricing=pricing,
             cache=cache,
             budget=budget,
+            guard=shared_guard,
             runs_dir=runs_dir,
         )
         try:

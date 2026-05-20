@@ -62,6 +62,7 @@ def detect_toolchain() -> ToolchainInfo:
 def runtime_project_root() -> Path:
     """Absolute path to ``provers/lean/runtime`` next to the repo root."""
     here = Path(__file__).resolve()
-    # src/kalinov/provers/lean/toolchain.py -> parents[3] == repo root
-    repo_root = here.parents[3]
+    # src/kalinov/provers/lean/toolchain.py
+    #   parents[0]=lean, [1]=provers, [2]=kalinov, [3]=src, [4]=repo root.
+    repo_root = here.parents[4]
     return repo_root / "provers" / "lean" / "runtime"

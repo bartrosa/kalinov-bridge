@@ -36,6 +36,17 @@ class OpenAICompatClient(LLMClient):
             kwargs["default_headers"] = dict(default_headers)
         self._client = openai.OpenAI(**kwargs)
 
+    @property
+    def cache_namespace(self) -> str:
+        """Cache namespace that distinguishes endpoints sharing ``provider_key``.
+
+        Two ``openai_compat`` providers pointed at different ``base_url`` values
+        must not share cached completions: the same ``model`` alias commonly
+        refers to entirely different model checkpoints across self-hosted
+        backends. Including the base URL here scopes cache entries per backend.
+        """
+        return f"{self.provider_key}:{self._base_url}"
+
     def complete(
         self,
         *,
@@ -61,6 +72,7 @@ class OpenAICompatClient(LLMClient):
             cache=self._cache,
             catalogue=self._catalogue,
             uncached=lambda: with_retries(call_once),
+            cache_namespace=self.cache_namespace,
         )
 
     def _complete_raw(

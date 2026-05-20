@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
 from kalinov.cost.catalogue import load_default_catalogue
 from kalinov.llm.base import Message
+from kalinov.llm.cache import CacheMode, LLMCache
 from kalinov.llm.providers.openai_compat_client import OpenAICompatClient
 
 

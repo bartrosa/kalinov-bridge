@@ -134,12 +134,21 @@ class EvalRunner:
         pricing: PricingCatalogue,
         cache: LLMCache | None = None,
         budget: Budget | None = None,
+        guard: BudgetGuard | None = None,
         runs_dir: Path = Path("runs"),
     ) -> None:
+        """``guard`` overrides ``budget`` when set: callers that run multiple
+        ``EvalRunner`` instances (e.g. a matrix expansion in
+        :func:`kalinov.eval.cli_impl._eval_async`) must construct a single
+        :class:`BudgetGuard` once and pass it to every runner so the budget
+        cap applies cumulatively across configs. When only ``budget`` is
+        supplied the runner builds an isolated guard, which is correct for
+        single-runner callers but leaks across configs."""
         self._kalinov_config = kalinov_config
         self._pricing = pricing
         self._cache = cache
         self._budget_template = budget
+        self._external_guard = guard
         self._runs_dir = Path(runs_dir).resolve()
 
     async def run(self, suite: Suite, config: EvalConfig) -> RunResult:
@@ -173,13 +182,21 @@ class EvalRunner:
         chain = _interpret_chain()
         task_results: list[TaskResult] = []
 
+        # Resolve the BudgetGuard once for the whole run. ``--max-cost-usd``
+        # (and the YAML ``budget:`` block) is a cap on cumulative spend
+        # across every task and obligation. An externally-supplied guard
+        # (passed by ``_eval_async``) additionally shares that cap across
+        # every config in a matrix run, matching ``kalinov solve`` semantics.
+        # Re-creating the guard per task — or per config — would silently let
+        # total spend grow as ``cap × tasks × configs``, defeating the cap.
+        shared_guard: BudgetGuard | None = self._external_guard
+        if shared_guard is None and self._budget_template is not None:
+            shared_guard = BudgetGuard(self._budget_template)
+
         for task in suite.tasks:
             t0 = time.perf_counter_ns()
             with start_run(runs_dir=self._runs_dir) as run:
-                guard: BudgetGuard | None = None
-                if self._budget_template is not None:
-                    guard = BudgetGuard(self._budget_template)
-                set_budget_guard(guard)
+                set_budget_guard(shared_guard)
                 outcomes: list[OracleOutcome] = []
                 obligations_solved = 0
                 sum_usd = Decimal("0")
