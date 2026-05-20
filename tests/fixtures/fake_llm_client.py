@@ -71,9 +71,8 @@ class FakeLLMClient(LLMClient):
             model_id=result.model_id_resolved,
             catalogue=catalogue,
         )
-        guard = active_budget_guard()
-        if guard is not None:
-            guard.record(cost=cost, usage=result.usage, provider=self.provider_key)
+        # Match real provider pipeline ordering: log + cache before budget
+        # enforcement so a budget-tripping successful call is still observable.
         log_llm_call(
             provider=self.provider_key,
             model_id_resolved=result.model_id_resolved,
@@ -84,6 +83,9 @@ class FakeLLMClient(LLMClient):
             error_code=None,
             extras_summary=extras_summary_from(None),
         )
+        guard = active_budget_guard()
+        if guard is not None:
+            guard.record(cost=cost, usage=result.usage, provider=self.provider_key)
         return result
 
     def stream(

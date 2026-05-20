@@ -109,7 +109,7 @@ class GeminiClient(LLMClient):
         usage = TokenUsage(
             input=visible_in,
             output=out,
-            reasoning=0,
+            reasoning=thoughts,
             cache_read=cached,
             cache_write=0,
         )

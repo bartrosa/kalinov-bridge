@@ -46,11 +46,28 @@ class BudgetGuard:
     def record(self, *, cost: CostBreakdown, usage: TokenUsage, provider: str) -> None:
         """Apply a completed non-cached call; raise if any limit is exceeded."""
         with self._lock:
+            b = self._budget
+            # When max_cost_usd is configured but the call lacks a pricing entry,
+            # estimate_cost returns total_usd=0 + pricing_source="unknown". Adding
+            # those zeros to self._spent would let the run accumulate unbounded
+            # real-money spend without ever tripping the cap. Refuse the call
+            # instead — the user can either add a pricing.yaml row or unset the
+            # cap.
+            if b.max_cost_usd is not None and cost.pricing_source == "unknown":
+                raise BudgetExceededError(
+                    provider=provider,
+                    message=(
+                        "refusing to silently bypass max_cost_usd="
+                        f"{b.max_cost_usd}: no pricing entry for this model "
+                        f"(provider={provider}). Add it to pricing.yaml or "
+                        "unset max_cost_usd."
+                    ),
+                )
+
             self._spent += cost.total_usd
             self._tokens += usage.total_all()
             self._calls += 1
 
-            b = self._budget
             if b.max_cost_usd is not None and self._spent > b.max_cost_usd:
                 raise BudgetExceededError(
                     provider=provider,
