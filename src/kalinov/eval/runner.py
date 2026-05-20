@@ -173,13 +173,19 @@ class EvalRunner:
         chain = _interpret_chain()
         task_results: list[TaskResult] = []
 
+        # Single BudgetGuard for the whole eval run: ``--max-cost-usd`` (and the
+        # YAML ``budget:`` block) cap **cumulative** spend across every task and
+        # every obligation, matching ``kalinov solve`` semantics. Re-creating
+        # the guard per task would silently let total spend grow as
+        # ``cap × tasks``, defeating the cost cap.
+        shared_guard: BudgetGuard | None = None
+        if self._budget_template is not None:
+            shared_guard = BudgetGuard(self._budget_template)
+
         for task in suite.tasks:
             t0 = time.perf_counter_ns()
             with start_run(runs_dir=self._runs_dir) as run:
-                guard: BudgetGuard | None = None
-                if self._budget_template is not None:
-                    guard = BudgetGuard(self._budget_template)
-                set_budget_guard(guard)
+                set_budget_guard(shared_guard)
                 outcomes: list[OracleOutcome] = []
                 obligations_solved = 0
                 sum_usd = Decimal("0")
