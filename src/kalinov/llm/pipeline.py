@@ -114,10 +114,15 @@ def run_completion(
         catalogue=catalogue,
     )
 
-    guard = active_budget_guard()
-    if guard is not None:
-        guard.record(cost=cost, usage=result.usage, provider=provider_label)
-
+    # Persist telemetry and cache the response BEFORE recording against the
+    # budget. ``BudgetGuard.record`` may raise :class:`BudgetExceededError` for
+    # a successful (already-billed) provider call; if we logged/cached after
+    # ``guard.record``, that work would be silently dropped, which would:
+    #   * mask the actual provider spend in ``llm_calls.jsonl`` /
+    #     ``kalinov cost report`` (the user is told the run cost $0 when it
+    #     really cost real money),
+    #   * leave the cache un-populated, so a retry with a larger budget would
+    #     re-bill the same prompt against the provider.
     lat = int((time.perf_counter_ns() - t0) / 1_000_000)
     log_llm_call(
         provider=provider_label,
@@ -141,6 +146,10 @@ def run_completion(
             extras=extras,
         )
         cache.set(key, provider=provider_catalog_key, completion=result)
+
+    guard = active_budget_guard()
+    if guard is not None:
+        guard.record(cost=cost, usage=result.usage, provider=provider_label)
 
     return result
 
