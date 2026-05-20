@@ -42,14 +42,24 @@ def run_completion(
     cache: LLMCache | None,
     catalogue: PricingCatalogue,
     uncached: Callable[[], Completion],
+    cache_namespace: str | None = None,
 ) -> Completion:
-    """Handle cache lookup/miss, telemetry, and budget recording."""
+    """Handle cache lookup/miss, telemetry, and budget recording.
+
+    ``cache_namespace`` separates the cache key from the pricing/telemetry key.
+    Providers whose ``provider_key`` is shared across multiple distinct
+    endpoints (notably ``openai_compat``, which is the same class string for
+    every base_url) must pass a namespace that uniquely identifies the
+    backend so cached responses from one endpoint are not served to another.
+    Defaults to ``provider_catalog_key`` for backwards compatibility.
+    """
     t0 = time.perf_counter_ns()
     summary = extras_summary_from(extras)
+    cache_key_provider = cache_namespace or provider_catalog_key
 
     if cache is not None and cache.mode is not CacheMode.OFF:
         key = cache.key_for(
-            provider=provider_catalog_key,
+            provider=cache_key_provider,
             model=model_alias,
             messages=messages,
             max_tokens=max_tokens,
@@ -114,10 +124,15 @@ def run_completion(
         catalogue=catalogue,
     )
 
-    guard = active_budget_guard()
-    if guard is not None:
-        guard.record(cost=cost, usage=result.usage, provider=provider_label)
-
+    # Persist telemetry and cache the response BEFORE recording against the
+    # budget. ``BudgetGuard.record`` may raise :class:`BudgetExceededError` for
+    # a successful (already-billed) provider call; if we logged/cached after
+    # ``guard.record``, that work would be silently dropped, which would:
+    #   * mask the actual provider spend in ``llm_calls.jsonl`` /
+    #     ``kalinov cost report`` (the user is told the run cost $0 when it
+    #     really cost real money),
+    #   * leave the cache un-populated, so a retry with a larger budget would
+    #     re-bill the same prompt against the provider.
     lat = int((time.perf_counter_ns() - t0) / 1_000_000)
     log_llm_call(
         provider=provider_label,
@@ -132,7 +147,7 @@ def run_completion(
 
     if cache is not None and cache.mode is CacheMode.READ_WRITE:
         key = cache.key_for(
-            provider=provider_catalog_key,
+            provider=cache_key_provider,
             model=model_alias,
             messages=messages,
             max_tokens=max_tokens,
@@ -140,7 +155,11 @@ def run_completion(
             stop=stop,
             extras=extras,
         )
-        cache.set(key, provider=provider_catalog_key, completion=result)
+        cache.set(key, provider=cache_key_provider, completion=result)
+
+    guard = active_budget_guard()
+    if guard is not None:
+        guard.record(cost=cost, usage=result.usage, provider=provider_label)
 
     return result
 

@@ -17,10 +17,10 @@ jobs:
       matrix:
         python-version: ["3.11", "3.12"]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
 
@@ -43,10 +43,10 @@ jobs:
     name: python (MCP extra)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
 
@@ -69,7 +69,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - uses: leanprover/lean-action@v1
         with:
@@ -82,7 +82,7 @@ jobs:
     needs: python
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Install elan
         run: |
@@ -91,7 +91,7 @@ jobs:
           echo "$HOME/.elan/bin" >> $GITHUB_PATH
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
 
@@ -99,7 +99,7 @@ jobs:
         run: uv sync --frozen --group dev --python 3.12
 
       - name: Cache Lake build (prover runtime)
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: provers/lean/runtime/.lake
           key: lake-${{ runner.os }}-${{ hashFiles('provers/lean/runtime/lake-manifest.json', 'provers/lean/runtime/lean-toolchain') }}
