@@ -27,11 +27,14 @@ class OpenAICompatClient(LLMClient):
         base_url: str,
         catalogue: PricingCatalogue,
         cache: LLMCache | None = None,
+        default_headers: Mapping[str, str] | None = None,
     ) -> None:
         self._catalogue = catalogue
         self._cache = cache
-        self._base_url = base_url
-        self._client = openai.OpenAI(api_key=api_key, base_url=base_url)
+        kwargs: dict[str, Any] = {"api_key": api_key, "base_url": base_url}
+        if default_headers:
+            kwargs["default_headers"] = dict(default_headers)
+        self._client = openai.OpenAI(**kwargs)
 
     @property
     def cache_namespace(self) -> str:

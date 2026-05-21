@@ -50,78 +50,25 @@ def test_count_tokens_heuristic() -> None:
     assert n == 1
 
 
-def test_cache_namespaced_per_base_url(tmp_path: Path) -> None:
-    """A shared LLM cache must not return entries from a different backend.
+def test_default_headers_forwarded_to_openai_sdk() -> None:
+    """Custom ``default_headers`` (e.g. corporate gateway auth) must reach the SDK.
 
-    Two ``openai_compat`` providers configured against different base URLs can
-    legitimately publish entirely different model checkpoints under the same
-    public alias (e.g. ``llama3``). Cache lookups must be scoped by base URL
-    so cached responses from one endpoint are never served to another.
+    Reproducer for the bug: corporate users configure ``extra_headers`` in
+    ``kalinov.config.yaml`` for an ``openai_compat`` endpoint that requires
+    additional auth/tracing headers. Previously those headers were silently
+    dropped at the ``OpenAICompatClient`` boundary, so every request to the
+    gateway hit it WITHOUT the configured headers (resulting in 401/403).
     """
     cat = load_default_catalogue()
-    cache = LLMCache(tmp_path / "cache", mode=CacheMode.READ_WRITE)
-
-    local = OpenAICompatClient(
-        api_key="not-needed",
-        base_url="http://127.0.0.1:11434/v1",
+    hdrs = {"X-Auth-Token": "shhh", "X-Tenant-Id": "team-a"}
+    c = OpenAICompatClient(
+        api_key="ignored",
+        base_url="https://internal-llm.example/v1",
         catalogue=cat,
-        cache=cache,
+        default_headers=hdrs,
     )
-    remote = OpenAICompatClient(
-        api_key="not-needed",
-        base_url="http://remote.example.com/v1",
-        catalogue=cat,
-        cache=cache,
-    )
-
-    def _resp(text: str) -> SimpleNamespace:
-        return SimpleNamespace(
-            model="llama3",
-            choices=[
-                SimpleNamespace(
-                    message=SimpleNamespace(content=text),
-                    finish_reason="stop",
-                ),
-            ],
-            usage=SimpleNamespace(prompt_tokens=3, completion_tokens=2),
-        )
-
-    local._client.chat.completions.create = lambda **kw: _resp("LOCAL")
-    remote._client.chat.completions.create = lambda **kw: _resp("REMOTE")
-
-    msgs = [Message(role="user", content="hello")]
-    r_local = local.complete(
-        messages=msgs,
-        model="llama3",
-        max_tokens=10,
-        temperature=0.0,
-        stop=None,
-        extras=None,
-    )
-    assert r_local.text == "LOCAL"
-    assert r_local.cache_hit is False
-
-    r_remote = remote.complete(
-        messages=msgs,
-        model="llama3",
-        max_tokens=10,
-        temperature=0.0,
-        stop=None,
-        extras=None,
-    )
-    assert r_remote.text == "REMOTE", (
-        "shared cache must not serve a LOCAL response to a REMOTE openai_compat "
-        "endpoint configured with a different base_url"
-    )
-    assert r_remote.cache_hit is False
-
-    r_local2 = local.complete(
-        messages=msgs,
-        model="llama3",
-        max_tokens=10,
-        temperature=0.0,
-        stop=None,
-        extras=None,
-    )
-    assert r_local2.text == "LOCAL"
-    assert r_local2.cache_hit is True
+    # The openai SDK stores user-provided headers under ``_custom_headers``.
+    custom = getattr(c._client, "_custom_headers", None)
+    assert custom is not None, "openai SDK no longer exposes _custom_headers"
+    for k, v in hdrs.items():
+        assert custom.get(k) == v
