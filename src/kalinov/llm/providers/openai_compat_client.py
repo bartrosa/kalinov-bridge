@@ -31,6 +31,7 @@ class OpenAICompatClient(LLMClient):
     ) -> None:
         self._catalogue = catalogue
         self._cache = cache
+        self._base_url = base_url
         kwargs: dict[str, Any] = {"api_key": api_key, "base_url": base_url}
         if default_headers:
             kwargs["default_headers"] = dict(default_headers)
