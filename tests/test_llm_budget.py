@@ -86,3 +86,37 @@ def test_unknown_pricing_without_cost_cap_is_allowed() -> None:
     s = g.state
     assert s.calls == 1
     assert s.total_tokens == 5
+
+
+def test_ensure_not_exceeded_passes_when_under_caps() -> None:
+    g = BudgetGuard(Budget(max_cost_usd=Decimal("1.00"), max_total_tokens=100, max_calls=5))
+    g.ensure_not_exceeded(provider="openai")  # should not raise on a fresh guard
+    g.record(cost=_cost("0.10"), usage=TokenUsage(input=1, output=1), provider="openai")
+    g.ensure_not_exceeded(provider="openai")  # still well under the cap
+
+
+def test_ensure_not_exceeded_blocks_after_cost_cap_tripped() -> None:
+    g = BudgetGuard(Budget(max_cost_usd=Decimal("1.00")))
+    g.record(cost=_cost("0.60"), usage=TokenUsage(input=1), provider="openai")
+    with pytest.raises(BudgetExceededError):
+        g.record(cost=_cost("0.60"), usage=TokenUsage(input=1), provider="openai")
+    with pytest.raises(BudgetExceededError, match="already exceeded"):
+        g.ensure_not_exceeded(provider="openai")
+
+
+def test_ensure_not_exceeded_blocks_after_max_calls_reached() -> None:
+    g = BudgetGuard(Budget(max_calls=2))
+    g.record(cost=_cost("0"), usage=TokenUsage(input=1), provider="openai")
+    g.record(cost=_cost("0"), usage=TokenUsage(input=1), provider="openai")
+    # ``record`` only raises on the call that would exceed; ``ensure_not_exceeded``
+    # is the pre-check, so it must refuse the NEXT call too.
+    with pytest.raises(BudgetExceededError, match="exhausted"):
+        g.ensure_not_exceeded(provider="openai")
+
+
+def test_ensure_not_exceeded_blocks_after_token_cap_tripped() -> None:
+    g = BudgetGuard(Budget(max_total_tokens=5))
+    with pytest.raises(BudgetExceededError):
+        g.record(cost=_cost("0"), usage=TokenUsage(input=10, output=0), provider="openai")
+    with pytest.raises(BudgetExceededError, match="already exceeded"):
+        g.ensure_not_exceeded(provider="openai")
