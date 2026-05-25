@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 import asyncio
 import json
 from decimal import Decimal
@@ -10,7 +11,7 @@ from pathlib import Path
 import pytest
 
 from kalinov.cli import main
-from kalinov.eval.cli_impl import _eval_async
+from kalinov.eval.cli_impl import _eval_async, _merge_experiment_cli
 from kalinov.eval.matrix import ConfigMatrix
 from kalinov.llm.budget import Budget
 from kalinov.llm.config import KalinovConfig, LLMProviderType, ProviderConfigEntry
@@ -152,3 +153,96 @@ def test_budget_is_shared_across_matrix_configs(
     assert all(
         OracleOutcomeKind.BUDGET_EXCEEDED in kinds for kinds in outcomes_by_config[1:]
     ), f"expected later configs to be budget-exceeded, got {outcomes_by_config}"
+
+
+def _exp_args_with_max_cost(config_file: Path, *, max_cost_usd: str) -> argparse.Namespace:
+    """Argparse Namespace matching ``kalinov eval --config-file ... --max-cost-usd ...``."""
+    return argparse.Namespace(
+        config_file=str(config_file),
+        prover=None,
+        provider=None,
+        model=None,
+        seed=None,
+        max_repair_attempts=None,
+        max_tokens=None,
+        temperature=None,
+        max_cost_usd=max_cost_usd,
+        out=None,
+    )
+
+
+def test_cli_max_cost_usd_preserves_other_budget_caps(
+    repo_root: Path, tmp_path: Path
+) -> None:
+    """``--max-cost-usd`` must override only the cost cap, not wipe the budget block.
+
+    Regression for a bug where ``_merge_experiment_cli`` rebuilt ``Budget``
+    from scratch when the user passed ``--max-cost-usd`` on the command line,
+    silently dropping ``max_total_tokens`` and ``max_calls`` that came from
+    the experiment YAML's ``budget:`` block.
+
+    Concrete trigger: a team pins ``max_calls: 100`` in
+    ``experiments/foo.yaml`` to bound runaway repair loops on a cheap model,
+    then runs ``kalinov eval --config-file experiments/foo.yaml
+    --max-cost-usd 5.00`` to additionally cap real-money spend. With the bug,
+    the ``max_calls`` cap was silently lost and the run could ship thousands
+    of provider requests inside the $5 envelope before the cost cap tripped.
+    """
+    exp_yaml = tmp_path / "exp.yaml"
+    exp_yaml.write_text(
+        f"suite: {repo_root / 'evals' / 'suites' / 'smoke.yaml'}\n"
+        "matrix:\n"
+        "  provers: ['null']\n"
+        "  providers:\n"
+        "    - { name: a }\n"
+        "  seeds: [0]\n"
+        "  oracle_configs:\n"
+        "    - {}\n"
+        "out: ./out\n"
+        "budget:\n"
+        "  max_total_tokens: 12345\n"
+        "  max_calls: 100\n",
+        encoding="utf-8",
+    )
+    args = _exp_args_with_max_cost(exp_yaml, max_cost_usd="5.00")
+    _suite_path, _matrix, budget, _out_dir = _merge_experiment_cli(exp_yaml, args)
+
+    assert budget is not None
+    assert budget.max_cost_usd == Decimal("5.00"), (
+        "--max-cost-usd must apply the requested cost cap"
+    )
+    assert budget.max_total_tokens == 12345, (
+        "max_total_tokens from experiment YAML must survive --max-cost-usd; "
+        "dropping it silently removes a user-configured safety cap"
+    )
+    assert budget.max_calls == 100, (
+        "max_calls from experiment YAML must survive --max-cost-usd; "
+        "dropping it silently removes a user-configured safety cap that "
+        "bounds runaway repair loops"
+    )
+
+
+def test_cli_max_cost_usd_with_no_yaml_budget(
+    repo_root: Path, tmp_path: Path
+) -> None:
+    """``--max-cost-usd`` works when the experiment file has no ``budget:`` block."""
+    exp_yaml = tmp_path / "exp.yaml"
+    exp_yaml.write_text(
+        f"suite: {repo_root / 'evals' / 'suites' / 'smoke.yaml'}\n"
+        "matrix:\n"
+        "  provers: ['null']\n"
+        "  providers:\n"
+        "    - { name: a }\n"
+        "  seeds: [0]\n"
+        "  oracle_configs:\n"
+        "    - {}\n"
+        "out: ./out\n",
+        encoding="utf-8",
+    )
+    args = _exp_args_with_max_cost(exp_yaml, max_cost_usd="2.50")
+    _suite_path, _matrix, budget, _out_dir = _merge_experiment_cli(exp_yaml, args)
+
+    assert budget is not None
+    assert budget.max_cost_usd == Decimal("2.50")
+    assert budget.max_total_tokens is None
+    assert budget.max_calls is None
