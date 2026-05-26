@@ -68,10 +68,19 @@ class BudgetGuard:
             self._tokens += usage.total_all()
             self._calls += 1
 
+            # The call has already happened and been billed by the provider.
+            # When we raise below, attach ``cost.total_usd`` so the caller
+            # (oracle loop, eval runner) can include this overrun in its
+            # per-obligation / per-task ``total_cost_usd``. Without this,
+            # the user-visible spend summary silently drops the cost of the
+            # call that tripped the cap, masking the actual overrun.
+            attempted = cost.total_usd
+
             if b.max_cost_usd is not None and self._spent > b.max_cost_usd:
                 raise BudgetExceededError(
                     provider=provider,
                     message=f"budget max_cost_usd exceeded ({self._spent} > {b.max_cost_usd})",
+                    attempted_cost_usd=attempted,
                 )
             if b.max_total_tokens is not None and self._tokens > b.max_total_tokens:
                 raise BudgetExceededError(
@@ -79,11 +88,13 @@ class BudgetGuard:
                     message=(
                         f"budget max_total_tokens exceeded ({self._tokens} > {b.max_total_tokens})"
                     ),
+                    attempted_cost_usd=attempted,
                 )
             if b.max_calls is not None and self._calls > b.max_calls:
                 raise BudgetExceededError(
                     provider=provider,
                     message=f"budget max_calls exceeded ({self._calls} > {b.max_calls})",
+                    attempted_cost_usd=attempted,
                 )
 
 

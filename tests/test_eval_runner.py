@@ -251,12 +251,20 @@ def test_budget_is_shared_across_tasks(
         f"{kinds_by_task!r} (per-task BudgetGuard would let every task spend "
         "the full cap independently)."
     )
-    # Sanity: cumulative recorded spend across all task results stays at or
-    # under one extra increment beyond the cap (the call that triggers the
-    # guard still counts toward the recorded total).
+    # Cumulative recorded spend across all task results matches the actual
+    # provider-billed total. Each obligation that initiates a call against an
+    # over-budget guard still incurs the unit cost on the provider (the guard
+    # raises only after ``record`` mutates state), and that cost is now
+    # propagated into ``OracleOutcome.total_cost_usd`` via
+    # ``BudgetExceededError.attempted_cost_usd`` so the user-visible summary
+    # no longer silently drops the overrun spend. With 3 tasks × 1 obligation
+    # × $0.000225 per call this is $0.000675.
+    unit = Decimal("0.000225")
     total_spend = sum(
         (tr.total_cost_usd for tr in rr.task_results), Decimal("0")
     )
-    assert total_spend <= Decimal("0.0005"), (
-        f"shared budget should bound total spend; got {total_spend}"
+    assert total_spend == unit * 3, (
+        "shared budget should attribute every billed call (including the "
+        f"overrun calls) to total_cost_usd; got {total_spend}, expected "
+        f"{unit * 3}"
     )
