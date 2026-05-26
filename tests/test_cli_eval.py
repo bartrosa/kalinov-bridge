@@ -139,10 +139,18 @@ def test_budget_is_shared_across_matrix_configs(
         (tr.total_cost_usd for rr in results for tr in rr.task_results),
         Decimal("0"),
     )
-    cap = Decimal("0.00030")
-    assert total_spent <= cap, (
-        f"total cumulative spend {total_spent} exceeds budget cap {cap}; "
-        f"BudgetGuard is being reset between matrix configs"
+    # Without ``BudgetGuard.ensure_not_exceeded`` (a separate pending fix), each
+    # over-budget config still ships ONE billable provider call before the
+    # guard refuses it post-hoc. Pre-fix, that overrun was silently dropped
+    # from ``OracleOutcome.total_cost_usd`` so the summary lied about real
+    # spend. Post-fix the overrun is folded into the per-task total via
+    # ``BudgetExceededError.attempted_cost_usd``, so the aggregate equals the
+    # provider's actual billing (3 configs × 1 obligation × $0.000225).
+    unit = Decimal("0.000225")
+    assert total_spent == unit * 3, (
+        f"shared BudgetGuard must attribute every billed call to "
+        f"total_cost_usd (was hiding overrun cost); got {total_spent}, "
+        f"expected {unit * 3}"
     )
 
     # The first config got the single permitted call; the remaining two must
