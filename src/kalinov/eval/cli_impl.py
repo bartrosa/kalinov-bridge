@@ -101,7 +101,22 @@ def _merge_experiment_cli(
 
     budget = spec.budget
     if args.max_cost_usd is not None:
-        budget = Budget(max_cost_usd=Decimal(str(args.max_cost_usd)))
+        # --max-cost-usd overrides only the cost cap. The experiment YAML
+        # ``budget:`` block can also configure ``max_total_tokens`` and
+        # ``max_calls`` as independent safety caps (e.g. to bound runaway
+        # repair loops on a cheap model where the cost cap alone is loose).
+        # Replacing the whole ``Budget`` here would silently drop those caps:
+        # a user who runs ``kalinov eval --config-file exp.yaml
+        # --max-cost-usd 5.00`` against an experiment that pins
+        # ``max_calls: 100`` would lose the call cap entirely and could ship
+        # thousands of provider requests inside the $5 envelope.
+        prior_tok = budget.max_total_tokens if budget is not None else None
+        prior_calls = budget.max_calls if budget is not None else None
+        budget = Budget(
+            max_cost_usd=Decimal(str(args.max_cost_usd)),
+            max_total_tokens=prior_tok,
+            max_calls=prior_calls,
+        )
 
     out_dir = Path(args.out).resolve() if args.out else spec.out_dir
     return spec.suite_path, matrix, budget, out_dir
