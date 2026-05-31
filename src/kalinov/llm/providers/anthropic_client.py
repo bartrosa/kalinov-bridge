@@ -130,7 +130,20 @@ class AnthropicClient(LLMClient):
         text = "".join(text_parts)
 
         u = resp.usage
-        thinking = int(getattr(u, "thinking_tokens", 0) or 0)
+        # Anthropic's `Usage` exposes extended-thinking tokens via the nested
+        # ``output_tokens_details.thinking_tokens`` field — there is no
+        # top-level ``thinking_tokens`` attribute. Reading it directly off ``u``
+        # always returns 0, which silently lumps every thinking token into the
+        # ``output`` bucket and leaves ``reasoning`` empty. With the bundled
+        # ``pricing.yaml`` (where ``output_per_mtok == reasoning_per_mtok`` for
+        # Claude) total cost still adds up, but per-bucket telemetry and any
+        # custom pricing that prices thinking tokens differently from visible
+        # output (e.g. a tiered enterprise rate) come out wrong. Mirror the
+        # OpenAI / Gemini adapters and read the nested details object.
+        otd = getattr(u, "output_tokens_details", None)
+        thinking = int(getattr(otd, "thinking_tokens", 0) or 0) if otd is not None else 0
+        # ``output_tokens`` is the authoritative billed total and *includes*
+        # thinking tokens, so subtract to get the visible output.
         out_reported = int(getattr(u, "output_tokens", 0) or 0)
         visible_out = max(out_reported - thinking, 0)
         usage = TokenUsage(
