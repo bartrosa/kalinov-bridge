@@ -83,6 +83,43 @@ def _make_prover(name: str) -> Prover:
     raise ValueError(f"unknown prover {name!r}")
 
 
+def _spec_error_outcome(
+    *,
+    task_id: str,
+    stage: str,
+    diagnostic: str,
+) -> OracleOutcome:
+    """Build a synthetic :class:`OracleOutcome` for spec-preparation errors.
+
+    ``EvalRunner`` previously let :class:`~kalinov.gherkin.errors.GherkinParseError`
+    and :class:`~kalinov.provers.errors.ProverError` (from
+    ``prover.extract_obligations``) propagate as :class:`RuntimeError`, which
+    aborted the entire matrix run and discarded every already-completed
+    ``TaskResult`` in-memory. That made one bad ``.feature`` file in a long
+    paid suite cause silent data loss for all prior LLM-billed work.
+
+    Wrapping the failure in a PROVER_ERROR outcome lets the runner record
+    the failure, mark the task as errored in the aggregated report, and keep
+    processing remaining tasks — matching the per-file resilience already
+    implemented in :func:`kalinov.cli_core.run_solve_programmatic` and
+    :func:`kalinov.cli_core.run_check_programmatic`.
+    """
+    obl = ProofObligation(
+        name=f"<spec-error:{task_id}>",
+        statement=f"eval task {task_id!r} failed at stage={stage!r}",
+        hypotheses=(),
+        metadata={"spec_error_stage": stage, "eval_task_id": task_id},
+    )
+    return OracleOutcome(
+        obligation=obl,
+        kind=OracleOutcomeKind.PROVER_ERROR,
+        attempts=(),
+        final_artifact=None,
+        total_cost_usd=Decimal("0"),
+        diagnostic=diagnostic,
+    )
+
+
 def _outcomes_match_expected(
     expected: TaskExpected,
     outcomes: tuple[OracleOutcome, ...],
@@ -202,32 +239,57 @@ class EvalRunner:
                 sum_usd = Decimal("0")
                 obligations: tuple[ProofObligation, ...] = ()
                 try:
+                    # Per-task spec preparation errors (Gherkin parse failures
+                    # and prover.extract_obligations() ProverError) must NOT
+                    # abort the whole suite. Before this guard those raised
+                    # RuntimeError, which escaped the for-task loop, exited
+                    # ``_eval_async`` without writing reports, and silently
+                    # dropped every previously-completed task's result —
+                    # turning a single malformed .feature file mid-suite into
+                    # full data loss for any prior LLM-billed work. Capture
+                    # the failure as a synthetic PROVER_ERROR outcome so the
+                    # task shows up as errored in the report and the loop
+                    # continues with the next task (matches the per-file
+                    # behavior of ``kalinov solve`` / ``kalinov check``).
+                    spec_err: OracleOutcome | None = None
                     try:
                         ff = parse_feature_file(task.file)
                     except GherkinParseError as exc:
-                        raise RuntimeError(f"parse error in {task.file}: {exc}") from exc
+                        spec_err = _spec_error_outcome(
+                            task_id=task.id,
+                            stage="parse",
+                            diagnostic=f"parse error in {task.file}: {exc}",
+                        )
+                    else:
+                        interpreted: list[InterpretedStep] = []
+                        for scenario in ff.feature.scenarios:
+                            for step in scenario.steps:
+                                interpreted.append(chain.interpret(step))
 
-                    interpreted: list[InterpretedStep] = []
-                    for scenario in ff.feature.scenarios:
-                        for step in scenario.steps:
-                            interpreted.append(chain.interpret(step))
+                        spec = SpecDocument(
+                            feature_file=ff,
+                            interpreted_steps=tuple(interpreted),
+                        )
+                        try:
+                            obligations = prover.extract_obligations(spec)
+                        except ProverError as exc:
+                            spec_err = _spec_error_outcome(
+                                task_id=task.id,
+                                stage="extract_obligations",
+                                diagnostic=(
+                                    f"extract_obligations failed for {task.id}: {exc}"
+                                ),
+                            )
 
-                    spec = SpecDocument(
-                        feature_file=ff,
-                        interpreted_steps=tuple(interpreted),
-                    )
-                    try:
-                        obligations = prover.extract_obligations(spec)
-                    except ProverError as exc:
-                        msg = f"extract_obligations failed for {task.id}: {exc}"
-                        raise RuntimeError(msg) from exc
-
-                    for obl in obligations:
-                        out = await oracle_loop.run(obl)
-                        outcomes.append(out)
-                        sum_usd += out.total_cost_usd
-                        if out.kind is OracleOutcomeKind.SOLVED:
-                            obligations_solved += 1
+                    if spec_err is not None:
+                        outcomes.append(spec_err)
+                    else:
+                        for obl in obligations:
+                            out = await oracle_loop.run(obl)
+                            outcomes.append(out)
+                            sum_usd += out.total_cost_usd
+                            if out.kind is OracleOutcomeKind.SOLVED:
+                                obligations_solved += 1
 
                     manifest = {
                         "run_id": run.run_id,
