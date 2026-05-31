@@ -43,6 +43,42 @@ class BudgetGuard:
                 calls=self._calls,
             )
 
+    def ensure_not_exceeded(self, *, provider: str) -> None:
+        """Raise :class:`BudgetExceededError` if a prior call already tripped a cap.
+
+        Call this **before** initiating a new billable provider request so that
+        a single over-budget call does not cause every subsequent obligation
+        (or task, or matrix config) to also be billed before raising. Cache
+        hits and other zero-cost operations must NOT call this — they remain
+        free even after the run is over budget.
+        """
+        with self._lock:
+            b = self._budget
+            if b.max_cost_usd is not None and self._spent > b.max_cost_usd:
+                raise BudgetExceededError(
+                    provider=provider,
+                    message=(
+                        "budget max_cost_usd already exceeded "
+                        f"({self._spent} > {b.max_cost_usd}); refusing new call"
+                    ),
+                )
+            if b.max_total_tokens is not None and self._tokens > b.max_total_tokens:
+                raise BudgetExceededError(
+                    provider=provider,
+                    message=(
+                        "budget max_total_tokens already exceeded "
+                        f"({self._tokens} > {b.max_total_tokens}); refusing new call"
+                    ),
+                )
+            if b.max_calls is not None and self._calls >= b.max_calls:
+                raise BudgetExceededError(
+                    provider=provider,
+                    message=(
+                        "budget max_calls already exhausted "
+                        f"({self._calls} >= {b.max_calls}); refusing new call"
+                    ),
+                )
+
     def record(self, *, cost: CostBreakdown, usage: TokenUsage, provider: str) -> None:
         """Apply a completed non-cached call; raise if any limit is exceeded."""
         with self._lock:
