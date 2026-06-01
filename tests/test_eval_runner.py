@@ -260,3 +260,102 @@ def test_budget_is_shared_across_tasks(
     assert total_spend <= Decimal("0.0005"), (
         f"shared budget should bound total spend; got {total_spend}"
     )
+
+
+def test_unparseable_task_does_not_abort_suite(
+    tmp_path: Path,
+    fake_kalinov_config: KalinovConfig,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A single malformed .feature must not destroy prior tasks' results.
+
+    Regression for data-loss bug where :class:`~gherkin.errors.GherkinParseError`
+    raised in :meth:`EvalRunner.run` was re-raised as :class:`RuntimeError`,
+    escaped the for-task loop, and exited ``_eval_async`` without writing any
+    report. A paid suite with N completed tasks ahead of the bad one would
+    drop every previously-collected ``TaskResult`` (the LLM had already been
+    billed but the eval report — the actual user-visible artifact — never
+    materialized, forcing a full re-run).
+
+    Expected new behaviour: the malformed task is recorded as a
+    ``PROVER_ERROR`` outcome, the runner keeps processing the rest of the
+    suite, and the prior tasks' results survive in the returned
+    ``RunResult``.
+    """
+    good = tmp_path / "good.feature"
+    good.write_text(
+        "# language: en\nFeature: F\n  Scenario: S\n    Then $1=1$\n",
+        encoding="utf-8",
+    )
+    bad = tmp_path / "bad.feature"
+    # Missing 'Feature:' makes the gherkin parser raise immediately on the
+    # 'Scenario:' line — a realistic failure mode when a user edits a task
+    # file in the middle of an eval run.
+    bad.write_text(
+        "this is not a valid gherkin file\nScenario: nope\n  Then never\n",
+        encoding="utf-8",
+    )
+    third = tmp_path / "third.feature"
+    third.write_text(
+        "# language: en\nFeature: G\n  Scenario: S2\n    Then $2=2$\n",
+        encoding="utf-8",
+    )
+    suite = Suite(
+        suite_id="s_parse",
+        description="",
+        tasks=(
+            Task(id="good", file=good.resolve(), expected=TaskExpected.EITHER, tags=()),
+            Task(id="bad", file=bad.resolve(), expected=TaskExpected.EITHER, tags=()),
+            Task(id="third", file=third.resolve(), expected=TaskExpected.EITHER, tags=()),
+        ),
+    )
+    cfg = EvalConfig(
+        prover_name="null",
+        provider_name="fake",
+        model="gpt-4o",
+        seed=0,
+        oracle=OracleConfig(max_repair_attempts=0),
+        label="parse_err_resilience",
+    )
+
+    fake = FakeLLMClient()
+    fake.set_queue(["theorem ok := rfl"] * 10)
+    monkeypatch.setattr(
+        "kalinov.eval.runner.make_client",
+        lambda *_a, **_k: fake,
+    )
+    runner = EvalRunner(
+        kalinov_config=fake_kalinov_config,
+        pricing=load_default_catalogue(),
+        runs_dir=tmp_path,
+    )
+    rr = asyncio.run(runner.run(suite, cfg))
+
+    assert len(rr.task_results) == 3, (
+        "all three tasks must produce a TaskResult; a single parse error "
+        "must not abort the suite or discard previously-completed work"
+    )
+    ids = [tr.task.id for tr in rr.task_results]
+    assert ids == ["good", "bad", "third"], (
+        f"task ordering must be preserved across the parse error; got {ids}"
+    )
+
+    bad_tr = rr.task_results[1]
+    assert any(o.kind is OracleOutcomeKind.PROVER_ERROR for o in bad_tr.outcomes), (
+        "the malformed task must surface as a PROVER_ERROR outcome so the "
+        f"eval report reflects the failure; got {[o.kind for o in bad_tr.outcomes]!r}"
+    )
+    diag = bad_tr.outcomes[0].diagnostic or ""
+    assert "parse error" in diag.lower() or "bad.feature" in diag, (
+        f"diagnostic must identify the failing file; got {diag!r}"
+    )
+
+    # The good tasks' outcomes must be preserved with non-error kinds.
+    for tr in (rr.task_results[0], rr.task_results[2]):
+        assert tr.outcomes, f"task {tr.task.id} must have at least one outcome"
+        assert all(
+            o.kind is not OracleOutcomeKind.PROVER_ERROR for o in tr.outcomes
+        ), (
+            f"good task {tr.task.id} should not be marked errored; "
+            f"got {[o.kind for o in tr.outcomes]!r}"
+        )

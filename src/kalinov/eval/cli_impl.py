@@ -175,7 +175,18 @@ async def _eval_async(
         results.append(rr)
         for tr in rr.task_results:
             for o in tr.outcomes:
-                if o.kind in (OracleOutcomeKind.LLM_ERROR, OracleOutcomeKind.BUDGET_EXCEEDED):
+                # PROVER_ERROR is included so that spec-preparation failures
+                # (Gherkin parse / extract_obligations errors, now captured
+                # as synthetic PROVER_ERROR outcomes per
+                # :func:`kalinov.eval.runner._spec_error_outcome`) still
+                # propagate to the CLI exit code. Without this, a malformed
+                # task file silently produced exit 0 even though it used to
+                # produce exit 2 by aborting the whole run.
+                if o.kind in (
+                    OracleOutcomeKind.LLM_ERROR,
+                    OracleOutcomeKind.BUDGET_EXCEEDED,
+                    OracleOutcomeKind.PROVER_ERROR,
+                ):
                     hard_failure = True
 
     written = dict(write_report(results, out_dir=out_dir, formats=formats))
