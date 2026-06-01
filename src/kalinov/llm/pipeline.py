@@ -101,6 +101,17 @@ def run_completion(
                 retriable=False,
             )
 
+    # Pre-check the cumulative budget BEFORE invoking the provider. Without
+    # this, every obligation that runs after the first over-budget call still
+    # makes a real (billable) provider request and only then is rejected by
+    # ``guard.record``. With N remaining obligations / tasks / matrix configs
+    # that turns a single $X overage into roughly ``N × per-call cost`` of
+    # extra real-money spend. Cache hits already returned above, so they
+    # remain free even when the run is over budget.
+    guard = active_budget_guard()
+    if guard is not None:
+        guard.ensure_not_exceeded(provider=provider_label)
+
     try:
         result = uncached()
     except LLMError as exc:
@@ -170,7 +181,6 @@ def run_completion(
         )
         cache.set(key, provider=cache_key_provider, completion=result)
 
-    guard = active_budget_guard()
     if guard is not None:
         guard.record(cost=cost, usage=result.usage, provider=provider_label)
 
