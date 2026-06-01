@@ -88,35 +88,47 @@ def test_unknown_pricing_without_cost_cap_is_allowed() -> None:
     assert s.total_tokens == 5
 
 
-def test_ensure_not_exceeded_passes_when_under_caps() -> None:
-    g = BudgetGuard(Budget(max_cost_usd=Decimal("1.00"), max_total_tokens=100, max_calls=5))
-    g.ensure_not_exceeded(provider="openai")  # should not raise on a fresh guard
-    g.record(cost=_cost("0.10"), usage=TokenUsage(input=1, output=1), provider="openai")
-    g.ensure_not_exceeded(provider="openai")  # still well under the cap
-
-
-def test_ensure_not_exceeded_blocks_after_cost_cap_tripped() -> None:
+def test_cost_cap_overrun_carries_attempted_cost_on_error() -> None:
+    """When ``record`` raises because the latest billable call pushed the
+    cumulative spend over ``max_cost_usd``, the resulting
+    :class:`BudgetExceededError` must carry that call's ``total_usd`` on
+    ``attempted_cost_usd`` so callers can include it in per-task /
+    per-obligation cost aggregates. Without this, the summary surface
+    that the user reads (eval report, solve summary) drops the exact
+    overrun call's cost and looks like the run stayed within budget.
+    """
     g = BudgetGuard(Budget(max_cost_usd=Decimal("1.00")))
-    g.record(cost=_cost("0.60"), usage=TokenUsage(input=1), provider="openai")
-    with pytest.raises(BudgetExceededError):
+    g.record(cost=_cost("0.50"), usage=TokenUsage(input=1), provider="openai")
+    with pytest.raises(BudgetExceededError) as ei:
         g.record(cost=_cost("0.60"), usage=TokenUsage(input=1), provider="openai")
-    with pytest.raises(BudgetExceededError, match="already exceeded"):
-        g.ensure_not_exceeded(provider="openai")
+    assert ei.value.attempted_cost_usd == Decimal("0.60")
 
 
-def test_ensure_not_exceeded_blocks_after_max_calls_reached() -> None:
-    g = BudgetGuard(Budget(max_calls=2))
-    g.record(cost=_cost("0"), usage=TokenUsage(input=1), provider="openai")
-    g.record(cost=_cost("0"), usage=TokenUsage(input=1), provider="openai")
-    # ``record`` only raises on the call that would exceed; ``ensure_not_exceeded``
-    # is the pre-check, so it must refuse the NEXT call too.
-    with pytest.raises(BudgetExceededError, match="exhausted"):
-        g.ensure_not_exceeded(provider="openai")
-
-
-def test_ensure_not_exceeded_blocks_after_token_cap_tripped() -> None:
+def test_token_cap_overrun_carries_attempted_cost_on_error() -> None:
     g = BudgetGuard(Budget(max_total_tokens=5))
-    with pytest.raises(BudgetExceededError):
-        g.record(cost=_cost("0"), usage=TokenUsage(input=10, output=0), provider="openai")
-    with pytest.raises(BudgetExceededError, match="already exceeded"):
-        g.ensure_not_exceeded(provider="openai")
+    g.record(cost=_cost("0.10"), usage=TokenUsage(input=3, output=2), provider="gemini")
+    with pytest.raises(BudgetExceededError) as ei:
+        g.record(cost=_cost("0.25"), usage=TokenUsage(input=1), provider="gemini")
+    assert ei.value.attempted_cost_usd == Decimal("0.25")
+
+
+def test_call_cap_overrun_carries_attempted_cost_on_error() -> None:
+    g = BudgetGuard(Budget(max_calls=1))
+    g.record(cost=_cost("0.01"), usage=TokenUsage(input=1, output=1), provider="anthropic")
+    with pytest.raises(BudgetExceededError) as ei:
+        g.record(cost=_cost("0.33"), usage=TokenUsage(input=1, output=1), provider="anthropic")
+    assert ei.value.attempted_cost_usd == Decimal("0.33")
+
+
+def test_unknown_pricing_refusal_has_no_attempted_cost() -> None:
+    """The "unknown pricing" refusal happens before any state is mutated;
+    no real cost can be attributed to the refused call, so
+    ``attempted_cost_usd`` must stay ``None`` (oracle loop will skip adding)."""
+    g = BudgetGuard(Budget(max_cost_usd=Decimal("1.00")))
+    with pytest.raises(BudgetExceededError) as ei:
+        g.record(
+            cost=_cost("0", pricing_source="unknown"),
+            usage=TokenUsage(input=1, output=1),
+            provider="openai",
+        )
+    assert ei.value.attempted_cost_usd is None

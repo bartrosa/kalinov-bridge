@@ -130,6 +130,18 @@ class OracleLoop:
                 )
             except (BudgetExceededError, LLMError) as exc:
                 llm_id = take_last_llm_call_id()
+                # When ``BudgetGuard.record`` raises after a successful
+                # (already-billed) provider call, ``attempted_cost_usd``
+                # carries the cost of that call. Without folding it into
+                # ``total_cost`` the OracleOutcome would report ``$0`` for
+                # the obligation that tripped the cap even though the
+                # provider charged real money for the overrun, which
+                # silently understates the per-task / per-run spend the
+                # user sees in eval reports and the solve summary.
+                attempted_cost: str | None = None
+                if isinstance(exc, BudgetExceededError) and exc.attempted_cost_usd is not None:
+                    total_cost += exc.attempted_cost_usd
+                    attempted_cost = str(exc.attempted_cost_usd)
                 _oracle_line(
                     obligation_name=obligation.name,
                     iteration=iter_idx,
@@ -137,7 +149,7 @@ class OracleLoop:
                     t0_ns=t0,
                     llm_call_id=llm_id,
                     prover_call_id=None,
-                    cost_usd=None,
+                    cost_usd=attempted_cost,
                 )
                 self._maybe_save_transcript(obligation.name, transcript_buf)
                 kind = (

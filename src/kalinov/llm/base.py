@@ -5,6 +5,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
+from decimal import Decimal
 from typing import Any, ClassVar, Literal
 
 from kalinov.cost.models import TokenUsage
@@ -50,15 +51,37 @@ class LLMError(Exception):
 
 
 class BudgetExceededError(LLMError):
-    """Cumulative run budget was exceeded. Not retriable."""
+    """Cumulative run budget was exceeded. Not retriable.
 
-    def __init__(self, *, provider: str, message: str) -> None:
+    ``attempted_cost_usd`` carries the USD cost of the provider call that
+    actually tripped the cap (i.e. the call that was already billed before
+    :meth:`BudgetGuard.record` raised). It is ``None`` when no billable cost
+    can be attributed — e.g. when the guard refuses an "unknown pricing"
+    call without recording it, or for a pre-flight check that prevents the
+    call entirely.
+
+    Callers that aggregate per-obligation / per-task spend (notably the
+    oracle loop) must add this cost to their running totals; otherwise the
+    summary under-reports real-money spend on the boundary where the budget
+    cap is tripped — masking the very overrun the cap was meant to surface.
+    """
+
+    __slots__ = ("attempted_cost_usd",)
+
+    def __init__(
+        self,
+        *,
+        provider: str,
+        message: str,
+        attempted_cost_usd: Decimal | None = None,
+    ) -> None:
         super().__init__(
             provider=provider,
             code="budget_exceeded",
             message=message,
             retriable=False,
         )
+        self.attempted_cost_usd = attempted_cost_usd
 
 
 class LLMClient(ABC):
