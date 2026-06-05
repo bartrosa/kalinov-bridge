@@ -367,3 +367,98 @@ def test_unparseable_task_does_not_abort_suite(
             f"good task {tr.task.id} should not be marked errored; "
             f"got {[o.kind for o in tr.outcomes]!r}"
         )
+
+
+def test_featureless_task_does_not_abort_suite(
+    tmp_path: Path,
+    fake_kalinov_config: KalinovConfig,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A ``.feature`` file with no ``Feature:`` block must not destroy the suite.
+
+    Companion regression to ``test_unparseable_task_does_not_abort_suite``.
+    The PR #23 fix only catches ``GherkinParseError``; the underlying
+    ``gherkin-official`` parser, however, *accepts* a totally empty,
+    whitespace-only, or comment-only file and returns a doc whose
+    ``feature`` key is missing — which used to escape ``parse_feature_text``
+    as a raw ``KeyError`` and bypass the runner's
+    ``except GherkinParseError`` branch entirely. The whole eval suite
+    aborted mid-run, dropping every previously-collected ``TaskResult``
+    (same data-loss class as PR #23, different trigger).
+
+    A user can hit this by accidentally truncating a ``.feature`` file
+    while the suite is running, or by checking in an empty placeholder.
+    Expected behaviour now mirrors PR #23: the bad task is reported as a
+    ``PROVER_ERROR`` outcome, the surrounding good tasks keep their
+    results, and the suite returns one ``TaskResult`` per task.
+    """
+    good = tmp_path / "good.feature"
+    good.write_text(
+        "# language: en\nFeature: F\n  Scenario: S\n    Then $1=1$\n",
+        encoding="utf-8",
+    )
+    empty = tmp_path / "empty.feature"
+    empty.write_text("", encoding="utf-8")
+    third = tmp_path / "third.feature"
+    third.write_text(
+        "# language: en\nFeature: G\n  Scenario: S2\n    Then $2=2$\n",
+        encoding="utf-8",
+    )
+    suite = Suite(
+        suite_id="s_featureless",
+        description="",
+        tasks=(
+            Task(id="good", file=good.resolve(), expected=TaskExpected.EITHER, tags=()),
+            Task(id="empty", file=empty.resolve(), expected=TaskExpected.EITHER, tags=()),
+            Task(id="third", file=third.resolve(), expected=TaskExpected.EITHER, tags=()),
+        ),
+    )
+    cfg = EvalConfig(
+        prover_name="null",
+        provider_name="fake",
+        model="gpt-4o",
+        seed=0,
+        oracle=OracleConfig(max_repair_attempts=0),
+        label="featureless_resilience",
+    )
+
+    fake = FakeLLMClient()
+    fake.set_queue(["theorem ok := rfl"] * 10)
+    monkeypatch.setattr(
+        "kalinov.eval.runner.make_client",
+        lambda *_a, **_k: fake,
+    )
+    runner = EvalRunner(
+        kalinov_config=fake_kalinov_config,
+        pricing=load_default_catalogue(),
+        runs_dir=tmp_path,
+    )
+    rr = asyncio.run(runner.run(suite, cfg))
+
+    assert len(rr.task_results) == 3, (
+        "all three tasks must produce a TaskResult; an empty .feature file "
+        "must not abort the suite or discard previously-completed work"
+    )
+    ids = [tr.task.id for tr in rr.task_results]
+    assert ids == ["good", "empty", "third"], (
+        f"task ordering must be preserved across the parse error; got {ids}"
+    )
+
+    empty_tr = rr.task_results[1]
+    assert any(o.kind is OracleOutcomeKind.PROVER_ERROR for o in empty_tr.outcomes), (
+        "the empty task must surface as a PROVER_ERROR outcome so the eval "
+        f"report reflects the failure; got {[o.kind for o in empty_tr.outcomes]!r}"
+    )
+    diag = empty_tr.outcomes[0].diagnostic or ""
+    assert "parse error" in diag.lower() or "empty.feature" in diag, (
+        f"diagnostic must identify the failing file; got {diag!r}"
+    )
+
+    for tr in (rr.task_results[0], rr.task_results[2]):
+        assert tr.outcomes, f"task {tr.task.id} must have at least one outcome"
+        assert all(
+            o.kind is not OracleOutcomeKind.PROVER_ERROR for o in tr.outcomes
+        ), (
+            f"good task {tr.task.id} should not be marked errored; "
+            f"got {[o.kind for o in tr.outcomes]!r}"
+        )

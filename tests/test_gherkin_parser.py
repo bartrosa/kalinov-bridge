@@ -119,6 +119,43 @@ def test_parse_error_has_location(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize(
+    ("label", "text"),
+    [
+        ("empty", ""),
+        ("whitespace_only", "   \n   \n"),
+        ("single_comment", "# only a comment\n"),
+        ("multiple_comments", "# c1\n# c2\n# c3\n"),
+    ],
+)
+def test_parse_featureless_file_raises_gherkin_parse_error(
+    tmp_path: Path,
+    label: str,
+    text: str,
+) -> None:
+    """A ``.feature`` with no ``Feature:`` block must surface as a
+    :class:`GherkinParseError`, not a raw ``KeyError``.
+
+    The underlying ``gherkin-official`` parser accepts these inputs and
+    returns a doc whose ``feature`` key is missing or ``None``. Letting
+    that escape as ``KeyError`` bypasses every caller's
+    ``except GherkinParseError`` branch — which is exactly what bounds
+    the per-file damage in :func:`kalinov.cli_core.run_check_programmatic`,
+    :func:`kalinov.cli_core.run_solve_programmatic`, and
+    :class:`kalinov.eval.runner.EvalRunner`. Without this guard, dropping
+    an empty / comment-only file into a paid eval suite mid-run aborts
+    the whole run and discards every previously-completed task result
+    (the same data-loss class fixed for malformed-syntax files in PR #23).
+    """
+    src = tmp_path / f"{label}.feature"
+    src.write_text(text, encoding="utf-8")
+    with pytest.raises(GherkinParseError) as excinfo:
+        parse_feature_file(src)
+    err = excinfo.value
+    assert err.source_path == src.resolve()
+    assert "no Feature" in str(err) or "feature" in str(err).lower()
+
+
+@pytest.mark.parametrize(
     "path",
     sorted(EXAMPLES_DIR.glob("*.feature")),
     ids=lambda p: p.name,
