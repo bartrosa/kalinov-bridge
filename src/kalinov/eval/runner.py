@@ -239,18 +239,28 @@ class EvalRunner:
                 sum_usd = Decimal("0")
                 obligations: tuple[ProofObligation, ...] = ()
                 try:
-                    # Per-task spec preparation errors (Gherkin parse failures
-                    # and prover.extract_obligations() ProverError) must NOT
-                    # abort the whole suite. Before this guard those raised
-                    # RuntimeError, which escaped the for-task loop, exited
-                    # ``_eval_async`` without writing reports, and silently
-                    # dropped every previously-completed task's result —
-                    # turning a single malformed .feature file mid-suite into
-                    # full data loss for any prior LLM-billed work. Capture
-                    # the failure as a synthetic PROVER_ERROR outcome so the
-                    # task shows up as errored in the report and the loop
-                    # continues with the next task (matches the per-file
-                    # behavior of ``kalinov solve`` / ``kalinov check``).
+                    # Per-task spec preparation errors must NOT abort the whole
+                    # suite. We catch four failure modes here:
+                    #   * :class:`GherkinParseError` from ``parse_feature_file``
+                    #   * :class:`UnicodeDecodeError` from ``read_text(utf-8)``
+                    #     (file saved in a non-UTF-8 encoding / has stray bytes)
+                    #   * :class:`OSError` subclasses from ``read_text`` —
+                    #     ``FileNotFoundError`` / ``PermissionError`` /
+                    #     ``IsADirectoryError`` / generic I/O — covering the
+                    #     race between :func:`load_suite` validation and the
+                    #     per-task parse when the file is moved or chmod'd
+                    #     mid-run.
+                    #   * :class:`ProverError` from ``extract_obligations``
+                    # Without these guards each one bubbles up as an unhandled
+                    # exception, escapes the for-task loop, exits
+                    # ``_eval_async`` without writing the report, and silently
+                    # discards every previously-completed task's result —
+                    # turning a single bad .feature file mid-suite into full
+                    # data loss for any prior LLM-billed work. We capture the
+                    # failure as a synthetic PROVER_ERROR outcome so the task
+                    # shows up as errored in the report and the loop continues
+                    # with the next task (matches the per-file behavior of
+                    # ``kalinov solve`` / ``kalinov check``).
                     spec_err: OracleOutcome | None = None
                     try:
                         ff = parse_feature_file(task.file)
@@ -259,6 +269,45 @@ class EvalRunner:
                             task_id=task.id,
                             stage="parse",
                             diagnostic=f"parse error in {task.file}: {exc}",
+                        )
+                    except UnicodeDecodeError as exc:
+                        # ``parse_feature_file`` calls ``Path.read_text(encoding=
+                        # "utf-8")`` which raises :class:`UnicodeDecodeError` on
+                        # any non-UTF-8 byte sequence. A single task file saved
+                        # in a non-UTF-8 encoding (or with stray binary bytes
+                        # from a botched editor save / merge) would otherwise
+                        # propagate this exception out of the for-task loop,
+                        # exit ``_eval_async`` without writing the report, and
+                        # silently discard every previously-completed (and
+                        # billed) ``TaskResult``. ``GherkinParseError`` is
+                        # handled above for the same blast radius; the I/O-layer
+                        # failure modes need the same treatment.
+                        spec_err = _spec_error_outcome(
+                            task_id=task.id,
+                            stage="read",
+                            diagnostic=(
+                                f"could not decode {task.file} as UTF-8: {exc}"
+                            ),
+                        )
+                    except OSError as exc:
+                        # ``Path.read_text`` can also raise :class:`OSError`
+                        # subclasses (``FileNotFoundError``, ``PermissionError``,
+                        # ``IsADirectoryError``, generic I/O errors). Suite
+                        # validation in :func:`kalinov.eval.suite.load_suite`
+                        # checks each task's file at load time, but the file
+                        # can be moved, deleted, or have its permissions
+                        # changed between load and the per-task parse — common
+                        # in long-running paid suites where an editor save,
+                        # CI job, or version-control operation touches the
+                        # tree mid-run. Record the failure as a synthetic
+                        # PROVER_ERROR outcome and keep processing the suite.
+                        spec_err = _spec_error_outcome(
+                            task_id=task.id,
+                            stage="read",
+                            diagnostic=(
+                                f"could not read {task.file}: "
+                                f"{type(exc).__name__}: {exc}"
+                            ),
                         )
                     else:
                         interpreted: list[InterpretedStep] = []

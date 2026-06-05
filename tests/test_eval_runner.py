@@ -369,47 +369,31 @@ def test_unparseable_task_does_not_abort_suite(
         )
 
 
-def test_featureless_task_does_not_abort_suite(
+def _run_three_task_suite(
+    *,
+    bad_factory,
     tmp_path: Path,
     fake_kalinov_config: KalinovConfig,
     monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A ``.feature`` file with no ``Feature:`` block must not destroy the suite.
-
-    Companion regression to ``test_unparseable_task_does_not_abort_suite``.
-    The PR #23 fix only catches ``GherkinParseError``; the underlying
-    ``gherkin-official`` parser, however, *accepts* a totally empty,
-    whitespace-only, or comment-only file and returns a doc whose
-    ``feature`` key is missing — which used to escape ``parse_feature_text``
-    as a raw ``KeyError`` and bypass the runner's
-    ``except GherkinParseError`` branch entirely. The whole eval suite
-    aborted mid-run, dropping every previously-collected ``TaskResult``
-    (same data-loss class as PR #23, different trigger).
-
-    A user can hit this by accidentally truncating a ``.feature`` file
-    while the suite is running, or by checking in an empty placeholder.
-    Expected behaviour now mirrors PR #23: the bad task is reported as a
-    ``PROVER_ERROR`` outcome, the surrounding good tasks keep their
-    results, and the suite returns one ``TaskResult`` per task.
-    """
+) -> RunResult:
+    """Helper: build a 3-task suite where the middle task is broken by ``bad_factory``."""
     good = tmp_path / "good.feature"
     good.write_text(
         "# language: en\nFeature: F\n  Scenario: S\n    Then $1=1$\n",
         encoding="utf-8",
     )
-    empty = tmp_path / "empty.feature"
-    empty.write_text("", encoding="utf-8")
     third = tmp_path / "third.feature"
     third.write_text(
         "# language: en\nFeature: G\n  Scenario: S2\n    Then $2=2$\n",
         encoding="utf-8",
     )
+    bad_path = bad_factory(tmp_path)
     suite = Suite(
-        suite_id="s_featureless",
+        suite_id="s_io",
         description="",
         tasks=(
             Task(id="good", file=good.resolve(), expected=TaskExpected.EITHER, tags=()),
-            Task(id="empty", file=empty.resolve(), expected=TaskExpected.EITHER, tags=()),
+            Task(id="bad", file=bad_path, expected=TaskExpected.EITHER, tags=()),
             Task(id="third", file=third.resolve(), expected=TaskExpected.EITHER, tags=()),
         ),
     )
@@ -419,9 +403,8 @@ def test_featureless_task_does_not_abort_suite(
         model="gpt-4o",
         seed=0,
         oracle=OracleConfig(max_repair_attempts=0),
-        label="featureless_resilience",
+        label="io_err_resilience",
     )
-
     fake = FakeLLMClient()
     fake.set_queue(["theorem ok := rfl"] * 10)
     monkeypatch.setattr(
@@ -433,25 +416,137 @@ def test_featureless_task_does_not_abort_suite(
         pricing=load_default_catalogue(),
         runs_dir=tmp_path,
     )
-    rr = asyncio.run(runner.run(suite, cfg))
+    return asyncio.run(runner.run(suite, cfg))
+
+
+def test_non_utf8_task_file_does_not_abort_suite(
+    tmp_path: Path,
+    fake_kalinov_config: KalinovConfig,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A non-UTF-8 ``.feature`` mid-suite must not destroy prior tasks' results.
+
+    Regression for the I/O-layer counterpart of the
+    :func:`test_unparseable_task_does_not_abort_suite` data-loss bug.
+    ``parse_feature_file`` reads with ``encoding="utf-8"``, which raises
+    :class:`UnicodeDecodeError` (a ``ValueError`` subclass — *not* a
+    :class:`GherkinParseError`) on the first non-UTF-8 byte. Without the new
+    handler the exception escapes the for-task loop, exits ``_eval_async``
+    without writing the report, and silently drops every previously-completed
+    ``TaskResult`` — the same blast radius as the parse-error bug (LLM
+    already billed for the good tasks, but the user-visible artifact those
+    costs paid for never materializes).
+
+    Concrete trigger: an editor reopens a feature file in latin-1 and saves
+    accented characters, or a merge conflict marker injects ``\\xff`` bytes,
+    or the file was originally UTF-16. Suite validation in
+    :func:`load_suite` succeeds because it only checks ``is_file()``; the
+    decoding error surfaces only at per-task parse time.
+    """
+
+    def _write_latin1(tp: Path) -> Path:
+        bad = tp / "bad.feature"
+        # 0xff is never a valid UTF-8 start byte (a typical signature of a
+        # file mistakenly saved as latin-1 / UTF-16-LE BOM).
+        bad.write_bytes(
+            b"# language: en\nFeature: bad\n  Scenario: \xff oops\n"
+            b"    Then nope\n",
+        )
+        return bad.resolve()
+
+    rr = _run_three_task_suite(
+        bad_factory=_write_latin1,
+        tmp_path=tmp_path,
+        fake_kalinov_config=fake_kalinov_config,
+        monkeypatch=monkeypatch,
+    )
 
     assert len(rr.task_results) == 3, (
-        "all three tasks must produce a TaskResult; an empty .feature file "
-        "must not abort the suite or discard previously-completed work"
+        "all three tasks must produce a TaskResult; a UnicodeDecodeError on "
+        "the middle task must not abort the suite or discard previously-"
+        f"completed work. got {len(rr.task_results)} task result(s)"
     )
     ids = [tr.task.id for tr in rr.task_results]
-    assert ids == ["good", "empty", "third"], (
-        f"task ordering must be preserved across the parse error; got {ids}"
+    assert ids == ["good", "bad", "third"], (
+        f"task ordering must be preserved across the decode error; got {ids}"
     )
 
-    empty_tr = rr.task_results[1]
-    assert any(o.kind is OracleOutcomeKind.PROVER_ERROR for o in empty_tr.outcomes), (
-        "the empty task must surface as a PROVER_ERROR outcome so the eval "
-        f"report reflects the failure; got {[o.kind for o in empty_tr.outcomes]!r}"
+    bad_tr = rr.task_results[1]
+    assert any(o.kind is OracleOutcomeKind.PROVER_ERROR for o in bad_tr.outcomes), (
+        "the un-decodable task must surface as a PROVER_ERROR outcome so the "
+        f"eval report reflects the failure; got {[o.kind for o in bad_tr.outcomes]!r}"
     )
-    diag = empty_tr.outcomes[0].diagnostic or ""
-    assert "parse error" in diag.lower() or "empty.feature" in diag, (
-        f"diagnostic must identify the failing file; got {diag!r}"
+    diag = (bad_tr.outcomes[0].diagnostic or "").lower()
+    assert "utf-8" in diag or "decode" in diag or "bad.feature" in diag, (
+        "diagnostic must identify the decoding failure / failing file; "
+        f"got {diag!r}"
+    )
+
+    for tr in (rr.task_results[0], rr.task_results[2]):
+        assert tr.outcomes, f"task {tr.task.id} must have at least one outcome"
+        assert all(
+            o.kind is not OracleOutcomeKind.PROVER_ERROR for o in tr.outcomes
+        ), (
+            f"good task {tr.task.id} should not be marked errored; "
+            f"got {[o.kind for o in tr.outcomes]!r}"
+        )
+
+
+def test_missing_task_file_does_not_abort_suite(
+    tmp_path: Path,
+    fake_kalinov_config: KalinovConfig,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A vanished feature file mid-suite must not destroy prior tasks' results.
+
+    Concrete trigger: ``load_suite`` validates each task's file at load time,
+    but a long-running paid suite is wide open to mid-run file movement — a
+    background editor save, a CI cleanup job, a ``git checkout`` on the
+    feature corpus, or a watcher script can delete or rename the file
+    between ``is_file()`` validation and ``parse_feature_file``'s
+    ``read_text`` call. Pre-fix the resulting :class:`FileNotFoundError`
+    (an :class:`OSError` subclass — *not* a :class:`GherkinParseError`)
+    escapes the for-task loop and discards every prior ``TaskResult``.
+    """
+
+    def _stage_then_delete(tp: Path) -> Path:
+        bad = tp / "bad.feature"
+        bad.write_text(
+            "# language: en\nFeature: B\n  Scenario: S\n    Then $1=1$\n",
+            encoding="utf-8",
+        )
+        resolved = bad.resolve()
+        # Simulate the file vanishing between suite-load validation and the
+        # per-task parse. ``Task`` is already constructed with the resolved
+        # path; deleting now reproduces the race.
+        bad.unlink()
+        return resolved
+
+    rr = _run_three_task_suite(
+        bad_factory=_stage_then_delete,
+        tmp_path=tmp_path,
+        fake_kalinov_config=fake_kalinov_config,
+        monkeypatch=monkeypatch,
+    )
+
+    assert len(rr.task_results) == 3, (
+        "all three tasks must produce a TaskResult; a missing file on the "
+        "middle task must not abort the suite or discard previously-"
+        f"completed work. got {len(rr.task_results)} task result(s)"
+    )
+    ids = [tr.task.id for tr in rr.task_results]
+    assert ids == ["good", "bad", "third"], (
+        f"task ordering must be preserved across the I/O error; got {ids}"
+    )
+
+    bad_tr = rr.task_results[1]
+    assert any(o.kind is OracleOutcomeKind.PROVER_ERROR for o in bad_tr.outcomes), (
+        "the missing-file task must surface as a PROVER_ERROR outcome; "
+        f"got {[o.kind for o in bad_tr.outcomes]!r}"
+    )
+    diag = (bad_tr.outcomes[0].diagnostic or "").lower()
+    assert "read" in diag or "filenotfound" in diag or "bad.feature" in diag, (
+        f"diagnostic must identify the I/O failure / failing file; got {diag!r}"
     )
 
     for tr in (rr.task_results[0], rr.task_results[2]):
