@@ -44,7 +44,26 @@ def parse_feature_text(text: str, *, source_path: Path | None = None) -> Feature
     except ParserError as e:
         raise GherkinParseError(str(e), source_path=source_path) from e
 
-    raw_feature = doc["feature"]
+    # gherkin-official's parser accepts ``.feature`` files with no ``Feature:``
+    # at all (e.g. a totally empty file, whitespace-only, or comment-only) and
+    # returns a doc whose ``feature`` key is either missing or set to ``None``.
+    # Letting ``doc["feature"]`` propagate as ``KeyError`` (or feeding ``None``
+    # into ``_convert_feature``) would escape every caller's
+    # ``except GherkinParseError`` branch, which is what bounds the per-file
+    # damage in ``kalinov check`` / ``kalinov solve`` and what
+    # ``EvalRunner._spec_error_outcome`` relies on to keep a paid eval suite
+    # running past a single bad task. Without this branch, dropping an empty
+    # file into a 100-task suite aborts the whole run mid-flight (after
+    # already-billed tasks have completed) and discards every prior
+    # TaskResult — exactly the data-loss class fixed for malformed-syntax
+    # files in PR #23.
+    raw_feature = doc.get("feature")
+    if raw_feature is None:
+        raise GherkinParseError(
+            "no Feature defined in file (empty, whitespace-only, "
+            "or comment-only .feature)",
+            source_path=source_path,
+        )
     feature = _convert_feature(raw_feature)
     return FeatureFile(source_path=source_path, feature=feature)
 
