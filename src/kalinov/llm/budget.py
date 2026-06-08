@@ -33,6 +33,17 @@ class BudgetGuard:
         self._tokens = 0
         self._calls = 0
         self._lock = threading.Lock()
+        # Sticky refusal reason. Set once any call tripped a cap (real or
+        # unknown-pricing). All subsequent ``ensure_not_exceeded`` checks
+        # short-circuit on this so the next obligation / task / matrix config
+        # does NOT issue a fresh billable provider request only to be refused
+        # by ``record`` after the fact. Without this latch, the
+        # unknown-pricing refusal path (which deliberately does not mutate
+        # ``self._spent``) lets ``ensure_not_exceeded`` keep returning OK
+        # forever and the run accumulates one billed call per remaining
+        # obligation — defeating ``--max-cost-usd`` exactly when it matters
+        # (the user opted into a model that isn't in ``pricing.yaml``).
+        self._tripped_reason: str | None = None
 
     @property
     def state(self) -> BudgetState:
@@ -53,6 +64,15 @@ class BudgetGuard:
         free even after the run is over budget.
         """
         with self._lock:
+            # Honour the sticky trip first so the unknown-pricing refusal
+            # (which leaves the per-cap counters at zero) still blocks the
+            # next call instead of letting another billable request slip
+            # through. See the ``_tripped_reason`` docstring above.
+            if self._tripped_reason is not None:
+                raise BudgetExceededError(
+                    provider=provider,
+                    message=self._tripped_reason,
+                )
             b = self._budget
             if b.max_cost_usd is not None and self._spent > b.max_cost_usd:
                 raise BudgetExceededError(
@@ -90,14 +110,23 @@ class BudgetGuard:
             # instead — the user can either add a pricing.yaml row or unset the
             # cap.
             if b.max_cost_usd is not None and cost.pricing_source == "unknown":
+                msg = (
+                    "refusing to silently bypass max_cost_usd="
+                    f"{b.max_cost_usd}: no pricing entry for this model "
+                    f"(provider={provider}). Add it to pricing.yaml or "
+                    "unset max_cost_usd."
+                )
+                # Latch the trip so the next ``ensure_not_exceeded`` call
+                # rejects pre-flight rather than letting another billable
+                # request reach the provider. Without this latch, a suite
+                # with N obligations against an unpriced model would issue
+                # N real provider calls (one per obligation) before each
+                # was rejected by ``record`` — i.e. ``--max-cost-usd``
+                # would silently bound nothing for unpriced models.
+                self._tripped_reason = msg
                 raise BudgetExceededError(
                     provider=provider,
-                    message=(
-                        "refusing to silently bypass max_cost_usd="
-                        f"{b.max_cost_usd}: no pricing entry for this model "
-                        f"(provider={provider}). Add it to pricing.yaml or "
-                        "unset max_cost_usd."
-                    ),
+                    message=msg,
                 )
 
             self._spent += cost.total_usd

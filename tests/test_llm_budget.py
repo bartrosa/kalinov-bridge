@@ -132,3 +132,45 @@ def test_unknown_pricing_refusal_has_no_attempted_cost() -> None:
             provider="openai",
         )
     assert ei.value.attempted_cost_usd is None
+
+
+def test_unknown_pricing_refusal_latches_pre_flight_check() -> None:
+    """After ``record`` refuses an unknown-priced call, every subsequent
+    ``ensure_not_exceeded`` must refuse too — without this latch the next
+    obligation's pre-flight check sees ``spent_usd == 0`` (the refused call
+    deliberately doesn't mutate state) and lets another billable provider
+    call through. ``--max-cost-usd`` would then silently bound nothing for a
+    model that isn't in pricing.yaml: a suite with N obligations would issue
+    N real provider calls, each refused only AFTER being billed.
+    """
+    g = BudgetGuard(Budget(max_cost_usd=Decimal("1.00")))
+    with pytest.raises(BudgetExceededError, match="no pricing entry"):
+        g.record(
+            cost=_cost("0", pricing_source="unknown"),
+            usage=TokenUsage(input=10, output=10),
+            provider="openai",
+        )
+    # Pre-flight must now reject the next call (with the same refusal
+    # reason) instead of returning OK and allowing another billable
+    # provider request to land.
+    with pytest.raises(BudgetExceededError, match="no pricing entry"):
+        g.ensure_not_exceeded(provider="openai")
+    # State stays clean — counters were never mutated, just latched.
+    s = g.state
+    assert s.calls == 0
+    assert s.spent_usd == Decimal("0")
+    assert s.total_tokens == 0
+
+
+def test_unknown_pricing_refusal_does_not_latch_when_no_cost_cap() -> None:
+    """Without ``max_cost_usd`` configured, the unknown-pricing refusal
+    path isn't taken at all — so the latch must remain unset and ordinary
+    token/call caps continue to govern."""
+    g = BudgetGuard(Budget(max_total_tokens=100))
+    g.record(
+        cost=_cost("0", pricing_source="unknown"),
+        usage=TokenUsage(input=2, output=3),
+        provider="openai",
+    )
+    # No latch, no token cap exceeded → pre-flight returns OK.
+    g.ensure_not_exceeded(provider="openai")
