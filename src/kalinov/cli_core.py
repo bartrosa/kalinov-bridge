@@ -120,11 +120,46 @@ def run_check_programmatic(
         captured_run_id = run.run_id
         captured_runs_root = run.runs_root
         for path in paths:
+            # ``parse_feature_file`` calls ``Path.read_text(encoding="utf-8")``,
+            # which can raise four distinct error classes. We must catch every
+            # one of them so a single bad ``.feature`` (non-UTF-8 bytes, file
+            # vanished mid-run, permission stripped, replaced by a directory)
+            # is reported as a parse failure rather than escaping out of the
+            # for-path loop. Letting any of these propagate:
+            #   * crashes the ``kalinov check`` CLI mid-run with a Python
+            #     traceback, replacing exit code 2 (clean parse failure)
+            #     with 1 (uncaught exception);
+            #   * crashes the MCP server's ``check`` tool handler — only
+            #     ``GherkinParseError`` is caught at the MCP layer
+            #     (kalinov.mcp.tools.tool_check), so a UnicodeDecodeError
+            #     from a single bad request kills the long-running process
+            #     and breaks the connection for every other client;
+            #   * skips the manifest summary step inside ``start_run`` and
+            #     drops every later file in ``paths`` even though earlier
+            #     files in the same invocation completed.
+            # ``UnicodeDecodeError`` is a ``ValueError`` subclass and is *not*
+            # an ``OSError`` subclass, so we list both explicitly.
             try:
                 ff = parse_feature_file(path)
             except GherkinParseError as exc:
                 if echo:
                     print(f"parse error in {path}: {exc}", file=sys.stderr)
+                parse_failed = True
+                continue
+            except UnicodeDecodeError as exc:
+                if echo:
+                    print(
+                        f"could not decode {path} as UTF-8: {exc}",
+                        file=sys.stderr,
+                    )
+                parse_failed = True
+                continue
+            except OSError as exc:
+                if echo:
+                    print(
+                        f"could not read {path}: {type(exc).__name__}: {exc}",
+                        file=sys.stderr,
+                    )
                 parse_failed = True
                 continue
 
@@ -386,11 +421,47 @@ async def run_solve_programmatic(
         try:
             loop = OracleLoop(prover=prover, llm=client, model=resolved_model, config=oc)
             for path in paths:
+                # See the matching block in :func:`run_check_programmatic`:
+                # ``parse_feature_file``'s ``read_text(encoding="utf-8")`` can
+                # raise :class:`UnicodeDecodeError` (non-UTF-8 bytes) and
+                # :class:`OSError` subclasses (FileNotFoundError /
+                # PermissionError / IsADirectoryError) in addition to
+                # :class:`GherkinParseError`. Pre-fix only ``GherkinParseError``
+                # was caught, so a single malformed input would:
+                #   * crash ``kalinov solve`` mid-run after the first paid
+                #     LLM call on the prior file, replacing the documented
+                #     exit code 2 with an uncaught traceback and skipping
+                #     the per-run ``manifest.json`` write that records the
+                #     paid spend summary;
+                #   * crash the MCP server's ``solve`` tool handler — the
+                #     except chain in :func:`kalinov.mcp.tools.tool_solve`
+                #     does not include ``UnicodeDecodeError``/``OSError``,
+                #     so a single bad request takes down a long-running
+                #     server, severing the connection for every other
+                #     client.
+                # Treat the file as a parse failure (matching the eval
+                # runner's ``_spec_error_outcome`` policy) and keep going.
                 try:
                     ff = parse_feature_file(path)
                 except GherkinParseError as exc:
                     if echo:
                         print(f"parse error in {path}: {exc}", file=sys.stderr)
+                    parse_failed = True
+                    continue
+                except UnicodeDecodeError as exc:
+                    if echo:
+                        print(
+                            f"could not decode {path} as UTF-8: {exc}",
+                            file=sys.stderr,
+                        )
+                    parse_failed = True
+                    continue
+                except OSError as exc:
+                    if echo:
+                        print(
+                            f"could not read {path}: {type(exc).__name__}: {exc}",
+                            file=sys.stderr,
+                        )
                     parse_failed = True
                     continue
 
