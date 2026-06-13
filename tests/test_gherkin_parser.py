@@ -182,6 +182,76 @@ Feature: Loc
     assert step_loc.line >= 1 and step_loc.column >= 1
 
 
+def test_rule_scenarios_are_flattened(tmp_path: Path) -> None:
+    """Scenarios nested under ``Rule:`` must surface as feature-level scenarios.
+
+    Pre-fix, :func:`_convert_feature` ``continue``d past every ``"rule"``
+    child returned by ``gherkin-official``, silently dropping every
+    scenario nested under a ``Rule:`` block. The blast radius covered all
+    three top-level commands:
+
+    - ``kalinov check`` returned exit code 0 (no failures, no parse
+      errors) on files whose proofs were never actually run, masking real
+      regressions in CI.
+    - ``kalinov solve`` exited "success" with zero LLM calls when every
+      obligation lived under a Rule, even though the user thought their
+      proofs were attempted.
+    - ``kalinov eval`` reported ``obligations_total=0`` and
+      ``matched_expected=True`` (empty kinds is treated as "matched") for
+      any task file using Rule syntax, silently corrupting benchmark
+      numbers.
+    """
+    path = tmp_path / "rule.feature"
+    path.write_text(
+        """
+Feature: With a rule
+  Scenario: outside
+    Given x
+
+  Rule: business rule
+    Scenario: nested_a
+      Given a
+    Scenario: nested_b
+      Given b
+""".strip(),
+        encoding="utf-8",
+    )
+    ff = parse_feature_file(path)
+    names = [s.name for s in ff.feature.scenarios]
+    assert names == ["outside", "nested_a", "nested_b"]
+
+
+def test_rule_tags_inherit_to_nested_scenarios(tmp_path: Path) -> None:
+    """Tags on a ``Rule:`` propagate to every scenario it contains.
+
+    Gherkin's tag-inheritance contract states that tags declared on a
+    parent (Feature, Rule) apply to every nested scenario. Kalinov's
+    tag-based dispatch (notably ``@lean``) depends on this: silently
+    dropping the inherited tags would change which scenarios drive Lean
+    obligation extraction, leading to a different — and silently smaller
+    — set of obligations than the user expects.
+    """
+    path = tmp_path / "rule_tags.feature"
+    path.write_text(
+        """
+Feature: F
+  @lean @math
+  Rule: r
+    Scenario: a
+      Given x
+    @arith
+    Scenario: b
+      Given y
+""".strip(),
+        encoding="utf-8",
+    )
+    ff = parse_feature_file(path)
+    assert [s.name for s in ff.feature.scenarios] == ["a", "b"]
+    # Rule tags inherit; scenario-level tags are preserved and de-duplicated.
+    assert ff.feature.scenarios[0].tags == ("@lean", "@math")
+    assert ff.feature.scenarios[1].tags == ("@lean", "@math", "@arith")
+
+
 def test_immutability(tmp_path: Path) -> None:
     path = tmp_path / "frozen.feature"
     path.write_text(
