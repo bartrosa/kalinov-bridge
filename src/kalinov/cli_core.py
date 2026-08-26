@@ -120,11 +120,47 @@ def run_check_programmatic(
         captured_run_id = run.run_id
         captured_runs_root = run.runs_root
         for path in paths:
+            # ``parse_feature_file`` reads the file with ``encoding="utf-8"``
+            # before any Gherkin parsing happens, so the error space includes
+            # I/O-layer failures the Gherkin handler doesn't cover:
+            #   * :class:`UnicodeDecodeError` when the file was saved in a
+            #     non-UTF-8 encoding (latin-1, UTF-16-with-BOM, accidental
+            #     binary bytes from a botched merge / editor save).
+            #   * :class:`OSError` subclasses (``FileNotFoundError``,
+            #     ``PermissionError``, ``IsADirectoryError``, generic I/O)
+            #     when a file in the input list disappears or has its
+            #     permissions changed between the CLI's pre-flight
+            #     ``is_file()`` check and the per-path parse — common when
+            #     the user globs ``corpus/*.feature`` while a CI job, editor
+            #     save, or version-control operation touches the tree.
+            # Without these guards a single bad file mid-list aborts the
+            # whole loop, exits the ``with start_run(...)`` block without
+            # writing ``manifest.json``, and never returns a
+            # :class:`CheckProgrammaticResult` to the caller. The MCP /
+            # programmatic caller sees an unhandled exception instead of a
+            # structured per-file ``parse_failed=True`` row, and the per-run
+            # summary print is silently dropped.
             try:
                 ff = parse_feature_file(path)
             except GherkinParseError as exc:
                 if echo:
                     print(f"parse error in {path}: {exc}", file=sys.stderr)
+                parse_failed = True
+                continue
+            except UnicodeDecodeError as exc:
+                if echo:
+                    print(
+                        f"parse error in {path}: could not decode as UTF-8: {exc}",
+                        file=sys.stderr,
+                    )
+                parse_failed = True
+                continue
+            except OSError as exc:
+                if echo:
+                    print(
+                        f"parse error in {path}: {type(exc).__name__}: {exc}",
+                        file=sys.stderr,
+                    )
                 parse_failed = True
                 continue
 
@@ -386,11 +422,56 @@ async def run_solve_programmatic(
         try:
             loop = OracleLoop(prover=prover, llm=client, model=resolved_model, config=oc)
             for path in paths:
+                # ``parse_feature_file`` first does ``Path.read_text(
+                # encoding="utf-8")``, so a single bad file on disk can raise
+                # exceptions outside the :class:`GherkinParseError` hierarchy:
+                #   * :class:`UnicodeDecodeError` (non-UTF-8 byte sequences,
+                #     UTF-16/latin-1 saves, stray binary bytes from a merge
+                #     conflict or editor crash).
+                #   * :class:`OSError` subclasses (``FileNotFoundError``,
+                #     ``PermissionError``, ``IsADirectoryError``, generic
+                #     I/O) when the file is moved / chmod'd between the CLI
+                #     pre-flight ``is_file()`` check and this parse call —
+                #     trivially reproducible with ``kalinov solve
+                #     corpus/*.feature`` against a corpus that another
+                #     process is editing, or a CI job that cleans temp
+                #     directories.
+                # Pre-fix, those exceptions escape the for-path loop, exit
+                # the ``with start_run(...)`` block without writing
+                # ``manifest.json``, and discard the in-memory
+                # :class:`SolveOutcomeEntry` rows for every previously
+                # processed (and **already LLM-billed**) file. Per-call LLM
+                # telemetry under ``runs/<id>/llm_calls.jsonl`` survives
+                # because each call appends as it happens, but the
+                # per-obligation outcome list and the summary materialised
+                # via ``SolveProgrammaticResult`` / the ``solve summary``
+                # print do not — so the user pays for proof attempts whose
+                # results never reach the report. Mirror the eval-runner
+                # fix (PR #25) and treat each I/O failure the same way the
+                # Gherkin parse failure is already treated: mark
+                # ``parse_failed=True`` (drives non-zero exit code) and
+                # continue with the next file.
                 try:
                     ff = parse_feature_file(path)
                 except GherkinParseError as exc:
                     if echo:
                         print(f"parse error in {path}: {exc}", file=sys.stderr)
+                    parse_failed = True
+                    continue
+                except UnicodeDecodeError as exc:
+                    if echo:
+                        print(
+                            f"parse error in {path}: could not decode as UTF-8: {exc}",
+                            file=sys.stderr,
+                        )
+                    parse_failed = True
+                    continue
+                except OSError as exc:
+                    if echo:
+                        print(
+                            f"parse error in {path}: {type(exc).__name__}: {exc}",
+                            file=sys.stderr,
+                        )
                     parse_failed = True
                     continue
 
