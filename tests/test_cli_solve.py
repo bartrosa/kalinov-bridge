@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from decimal import Decimal
 from pathlib import Path
@@ -9,6 +10,8 @@ from pathlib import Path
 import pytest
 
 from kalinov.cli import main
+from kalinov.cli_core import SolveProgrammaticResult, run_solve_programmatic
+from kalinov.llm.config import KalinovConfig, LLMProviderType, ProviderConfigEntry
 from tests.fixtures.fake_llm_client import FakeLLMClient
 
 
