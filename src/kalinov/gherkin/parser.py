@@ -170,7 +170,32 @@ def _convert_feature(raw: Mapping[str, Any]) -> Feature:
         elif "scenario" in child:
             scenarios.append(_convert_scenario(child["scenario"]))
         elif "rule" in child:
-            continue
+            # Gherkin v6+ allows grouping scenarios under a ``Rule:`` block.
+            # ``gherkin-official`` returns rules as ``children`` entries whose
+            # own ``children`` list holds the nested scenarios (and an
+            # optional rule-level background). Previously we ``continue``'d
+            # past every rule, silently dropping every nested scenario. The
+            # blast radius was severe:
+            #
+            #   * ``kalinov check`` returned exit code 0 on files whose
+            #     proofs were never actually run (every scenario lived
+            #     under a Rule), masking real failures from CI.
+            #   * ``kalinov solve`` exited "success" with zero LLM calls
+            #     when every obligation was nested under a Rule — the user
+            #     thought their proofs were attempted (and the prover was
+            #     blamed for any later breakage) but the LLM was never
+            #     invoked.
+            #   * ``kalinov eval`` reported ``obligations_total=0`` /
+            #     ``matched_expected=True`` for any task file using Rule
+            #     syntax (see ``_outcomes_match_expected``: empty kinds is
+            #     treated as "matched"), silently corrupting benchmark
+            #     numbers.
+            #
+            # Flatten the rule's scenarios into the feature-level list and
+            # inherit the rule's tags onto each nested scenario (matches
+            # Gherkin's tag-inheritance semantics, so ``@lean`` /
+            # ``@math`` on a Rule still flows through to its scenarios).
+            _flatten_rule_scenarios(child["rule"], scenarios)
 
     return Feature(
         tags=_tags(raw["tags"]),
@@ -181,3 +206,45 @@ def _convert_feature(raw: Mapping[str, Any]) -> Feature:
         scenarios=tuple(scenarios),
         location=_convert_location(raw["location"]),
     )
+
+
+def _flatten_rule_scenarios(
+    rule_raw: Mapping[str, Any],
+    scenarios: list[Scenario],
+) -> None:
+    """Append every ``Scenario`` nested under a ``Rule:`` to *scenarios*.
+
+    Per Gherkin's tag-inheritance contract, tags declared on the ``Rule:``
+    apply to every scenario it contains. We prepend the rule's tags to each
+    scenario's own tags (de-duplicating while preserving order) so
+    downstream tag-based dispatch (notably ``@lean``) keeps working when
+    users write ``@lean`` on a ``Rule:`` instead of on every nested
+    ``Scenario:``.
+
+    Rule-level ``Background:`` blocks (if any) are intentionally not merged
+    here: the rest of the codebase does not consume background steps for
+    proving, so ignoring them is behaviour-preserving relative to the
+    feature-level background that was already supported.
+    """
+    rule_tags = _tags(rule_raw.get("tags") or [])
+    for sub in rule_raw.get("children") or ():
+        if "scenario" not in sub:
+            continue
+        sc = _convert_scenario(sub["scenario"])
+        if rule_tags:
+            merged: list[str] = []
+            seen: set[str] = set()
+            for t in (*rule_tags, *sc.tags):
+                if t in seen:
+                    continue
+                seen.add(t)
+                merged.append(t)
+            sc = Scenario(
+                tags=tuple(merged),
+                name=sc.name,
+                description=sc.description,
+                steps=sc.steps,
+                examples=sc.examples,
+                location=sc.location,
+            )
+        scenarios.append(sc)
