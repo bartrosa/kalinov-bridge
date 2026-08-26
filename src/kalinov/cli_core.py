@@ -147,17 +147,31 @@ def run_check_programmatic(
                 parse_failed = True
                 continue
             except UnicodeDecodeError as exc:
+                # ``parse_feature_file`` calls ``Path.read_text(encoding="utf-8")``,
+                # which raises :class:`UnicodeDecodeError` on any non-UTF-8 byte
+                # sequence (file saved in a non-UTF-8 encoding, UTF-16 BOM, stray
+                # bytes from a botched editor save / merge). Without catching it
+                # alongside :class:`GherkinParseError` the exception escapes the
+                # per-file loop, the summary line is never printed, and the
+                # caller sees an unhandled traceback — the same blast radius
+                # the eval runner fix (commit 59122b9) already addressed there.
                 if echo:
                     print(
-                        f"could not decode {path} as UTF-8: {exc}",
+                        f"read error in {path}: could not decode as UTF-8: {exc}",
                         file=sys.stderr,
                     )
                 parse_failed = True
                 continue
             except OSError as exc:
+                # ``Path.read_text`` can also raise :class:`OSError` subclasses
+                # (``FileNotFoundError``, ``PermissionError``,
+                # ``IsADirectoryError``, generic I/O). The CLI pre-validates
+                # ``path.is_file()`` before calling here, but that check is
+                # racy: an editor save, CI job, or VCS operation can move /
+                # chmod / delete the file between validation and this read.
                 if echo:
                     print(
-                        f"could not read {path}: {type(exc).__name__}: {exc}",
+                        f"read error in {path}: {type(exc).__name__}: {exc}",
                         file=sys.stderr,
                     )
                 parse_failed = True
@@ -449,17 +463,27 @@ async def run_solve_programmatic(
                     parse_failed = True
                     continue
                 except UnicodeDecodeError as exc:
+                    # See ``run_check_programmatic`` for context. The blast
+                    # radius here is strictly larger because ``kalinov solve``
+                    # has already billed real provider calls for every prior
+                    # file in the batch; letting the decode error escape the
+                    # for-loop skips the summary print and the ``manifest.json``
+                    # write below, so the user is charged for work that never
+                    # produces the user-visible roll-up artifact.
                     if echo:
                         print(
-                            f"could not decode {path} as UTF-8: {exc}",
+                            f"read error in {path}: could not decode as UTF-8: {exc}",
                             file=sys.stderr,
                         )
                     parse_failed = True
                     continue
                 except OSError as exc:
+                    # I/O race between ``_solve_async``'s ``is_file()`` check
+                    # and the per-file ``read_text``. Same data-loss class as
+                    # the ``UnicodeDecodeError`` branch above.
                     if echo:
                         print(
-                            f"could not read {path}: {type(exc).__name__}: {exc}",
+                            f"read error in {path}: {type(exc).__name__}: {exc}",
                             file=sys.stderr,
                         )
                     parse_failed = True
