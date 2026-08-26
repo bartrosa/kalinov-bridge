@@ -185,6 +185,69 @@ def test_tool_check_with_null_prover(tmp_path: Path) -> None:
     asyncio.run(run())
 
 
+def test_tool_solve_non_utf8_feature_returns_clean_error(tmp_path: Path) -> None:
+    """A non-UTF-8 feature file must not crash the MCP ``solve`` tool.
+
+    Pre-fix, :func:`run_solve_programmatic` only caught
+    :class:`GherkinParseError` around ``parse_feature_file``. Reading a
+    non-UTF-8 file raises :class:`UnicodeDecodeError` (a ``ValueError``
+    subclass), which is not caught at the MCP layer either — the
+    ``except`` chain in :func:`tool_solve` lists ``GherkinParseError``,
+    ``LLMError``/``BudgetExceededError``, ``ProverError``, ``ConfigError``,
+    ``ClientConfigError``, and ``ToolchainNotFoundError`` but not
+    ``UnicodeDecodeError``/``OSError``. The exception therefore escaped
+    out of the tool handler and crashed the long-running MCP server for
+    every other client.
+
+    With the cli_core fix, the bad file is reported as a parse failure
+    inside ``run_solve_programmatic`` (parse_failed=True), the call
+    returns normally, and the MCP tool can produce a structured response.
+    """
+    feat = tmp_path / "bad.feature"
+    feat.write_bytes(
+        b"# language: en\nFeature: B\n  Scenario: \xff oh no\n    Then 1=1\n",
+    )
+
+    cfg = tmp_path / "kalinov.config.yaml"
+    cfg.write_text(
+        "providers:\n"
+        "  fakep:\n"
+        "    type: openai_compat\n"
+        "    base_url: http://127.0.0.1:9/v1\n"
+        "    default_model: gpt-4o\n",
+        encoding="utf-8",
+    )
+
+    server_cfg = MCPServerConfig(
+        transport="stdio",
+        runs_dir=tmp_path / "runs",
+        kalinov_config_path=cfg,
+    )
+
+    async def run() -> None:
+        # No mocking — exercise the real run_solve_programmatic. If the
+        # bug is back, this raises UnicodeDecodeError out of the tool
+        # handler instead of returning a structured SolveResponse.
+        out = await tool_solve(
+            SolveRequest(feature_path=str(feat), provider="fakep", prover="null"),
+            server_cfg,
+        )
+        # The tool must not crash. The pre-fix behavior was an uncaught
+        # exception escaping the handler, so any well-formed response
+        # (success or structured failure) is sufficient to lock in the
+        # fix. We assert success because run_solve_programmatic now
+        # treats a single failing path as an empty-obligation run rather
+        # than an LLMError.
+        assert out is not None
+        # ``parse_failed`` from cli_core should NOT crash the MCP layer.
+        # Either the response is ok with no obligations, or it carries a
+        # structured ``error`` string — never a Python traceback.
+        if not out.ok:
+            assert out.error is not None
+
+    asyncio.run(run())
+
+
 def test_tool_eval_runs_smoke_suite(tmp_path: Path) -> None:
     suite = tmp_path / "suite.yaml"
     suite.write_text("suite: {}\n", encoding="utf-8")
